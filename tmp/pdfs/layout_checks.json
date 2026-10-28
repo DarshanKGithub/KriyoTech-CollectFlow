@@ -1,0 +1,488 @@
+[
+  {
+    "page": 1,
+    "y": 130,
+    "bottom": 212,
+    "text": "Every invoice.<br/>A clearer path to approval."
+  },
+  {
+    "page": 1,
+    "y": 232,
+    "bottom": 268,
+    "text": "Capture supplier invoices, match purchases and receipts, route approvals an"
+  },
+  {
+    "page": 1,
+    "y": 449,
+    "bottom": 463,
+    "text": "Record actual payments and retain the review trail throughout the process."
+  },
+  {
+    "page": 1,
+    "y": 551,
+    "bottom": 581,
+    "text": "Compare invoices with purchase orders and goods receipts."
+  },
+  {
+    "page": 1,
+    "y": 551,
+    "bottom": 581,
+    "text": "Bring finance, approvers and suppliers into a shared workflow."
+  },
+  {
+    "page": 1,
+    "y": 551,
+    "bottom": 581,
+    "text": "Prepare reviewed exports for your accounting system."
+  },
+  {
+    "page": 1,
+    "y": 697,
+    "bottom": 735,
+    "text": "Basic  \u20b92,999/month     Pro  \u20b97,999/month<br/>Enterprise  from \u20b919,999/mont"
+  },
+  {
+    "page": 1,
+    "y": 754,
+    "bottom": 777.2,
+    "text": "Client discussion proposal. Proposed inclusions and rates are subject to wr"
+  },
+  {
+    "page": 2,
+    "y": 101,
+    "bottom": 131,
+    "text": "Choose the capacity your team needs."
+  },
+  {
+    "page": 2,
+    "y": 143,
+    "bottom": 157.4,
+    "text": "Three proposed plans. A complete core workflow, with more automation and in"
+  },
+  {
+    "page": 2,
+    "y": 320,
+    "bottom": 333,
+    "text": "\u20b929,990 / year"
+  },
+  {
+    "page": 2,
+    "y": 359,
+    "bottom": 371,
+    "text": "250 invoices / month"
+  },
+  {
+    "page": 2,
+    "y": 383,
+    "bottom": 395,
+    "text": "5 internal users"
+  },
+  {
+    "page": 2,
+    "y": 407,
+    "bottom": 419,
+    "text": "Tally CSV export"
+  },
+  {
+    "page": 2,
+    "y": 443,
+    "bottom": 454,
+    "text": "For small finance teams"
+  },
+  {
+    "page": 2,
+    "y": 320,
+    "bottom": 333,
+    "text": "\u20b979,990 / year"
+  },
+  {
+    "page": 2,
+    "y": 359,
+    "bottom": 371,
+    "text": "1,000 invoices / month"
+  },
+  {
+    "page": 2,
+    "y": 383,
+    "bottom": 395,
+    "text": "15 internal users"
+  },
+  {
+    "page": 2,
+    "y": 407,
+    "bottom": 419,
+    "text": "1 accounting connector"
+  },
+  {
+    "page": 2,
+    "y": 443,
+    "bottom": 454,
+    "text": "For growing finance teams"
+  },
+  {
+    "page": 2,
+    "y": 320,
+    "bottom": 333,
+    "text": "From \u20b91,99,990 / year"
+  },
+  {
+    "page": 2,
+    "y": 359,
+    "bottom": 371,
+    "text": "3,000 invoices / month"
+  },
+  {
+    "page": 2,
+    "y": 383,
+    "bottom": 395,
+    "text": "40 internal users"
+  },
+  {
+    "page": 2,
+    "y": 407,
+    "bottom": 419,
+    "text": "Up to 2 connectors"
+  },
+  {
+    "page": 2,
+    "y": 443,
+    "bottom": 454,
+    "text": "For integration-led teams"
+  },
+  {
+    "page": 2,
+    "y": 744,
+    "bottom": 767.0,
+    "text": "* Business hours: Monday-Friday, 9:30am-6pm IST, excluding published holida"
+  },
+  {
+    "page": 3,
+    "y": 101,
+    "bottom": 131,
+    "text": "See what each plan includes."
+  },
+  {
+    "page": 3,
+    "y": 143,
+    "bottom": 157.4,
+    "text": "Proposed entitlements. Connection-dependent capabilities are activated afte"
+  },
+  {
+    "page": 3,
+    "y": 706.2,
+    "bottom": 729.2,
+    "text": "GRN = goods receipt note. AI results require human review. API coverage is "
+  },
+  {
+    "page": 4,
+    "y": 101,
+    "bottom": 131,
+    "text": "A useful workflow at every stage."
+  },
+  {
+    "page": 4,
+    "y": 143,
+    "bottom": 157.4,
+    "text": "Give people a clear next action, from a new supplier document to an approve"
+  },
+  {
+    "page": 4,
+    "y": 251,
+    "bottom": 291.9,
+    "text": "<b>Capture with review.</b> Upload documents or use configured intake. Chec"
+  },
+  {
+    "page": 4,
+    "y": 304.9,
+    "bottom": 345.8,
+    "text": "<b>Match what was received.</b> Compare the invoice, purchase order and par"
+  },
+  {
+    "page": 4,
+    "y": 358.8,
+    "bottom": 399.7,
+    "text": "<b>Route decisions.</b> Use supported multi-level approvals, rejection and "
+  },
+  {
+    "page": 4,
+    "y": 412.7,
+    "bottom": 440.0,
+    "text": "<b>Work with suppliers.</b> Receive portal submissions and resolve question"
+  },
+  {
+    "page": 4,
+    "y": 453.0,
+    "bottom": 480.2,
+    "text": "<b>Track settlement.</b> Record payment references, partial payments and re"
+  },
+  {
+    "page": 4,
+    "y": 493.2,
+    "bottom": 520.5,
+    "text": "<b>Prepare the handoff.</b> Export reviewed Tally-ready CSV with configured"
+  },
+  {
+    "page": 4,
+    "y": 251,
+    "bottom": 291.9,
+    "text": "<b>Handle more work together.</b> Process larger invoice volumes with more "
+  },
+  {
+    "page": 4,
+    "y": 304.9,
+    "bottom": 332.2,
+    "text": "<b>Apply supported rules.</b> Use eligible auto-approval only after rules a"
+  },
+  {
+    "page": 4,
+    "y": 345.2,
+    "bottom": 386.1,
+    "text": "<b>Reconcile statements.</b> Import mapped CSV/XLSX statements and review e"
+  },
+  {
+    "page": 4,
+    "y": 399.1,
+    "bottom": 440.0,
+    "text": "<b>Review month end.</b> Use operational tax flags, the review checklist an"
+  },
+  {
+    "page": 4,
+    "y": 453.0,
+    "bottom": 493.8,
+    "text": "<b>Connect accounting.</b> Add one supported TallyPrime, ERPNext or Zoho Bo"
+  },
+  {
+    "page": 4,
+    "y": 506.8,
+    "bottom": 547.7,
+    "text": "<b>Share supported data.</b> Use read-only API access and signed outgoing w"
+  },
+  {
+    "page": 4,
+    "y": 742,
+    "bottom": 765.0,
+    "text": "Configured Gmail intake is bounded and read-only. Vendor portal access uses"
+  },
+  {
+    "page": 5,
+    "y": 101,
+    "bottom": 131,
+    "text": "Connect with an acceptance plan."
+  },
+  {
+    "page": 5,
+    "y": 143,
+    "bottom": 171.8,
+    "text": "Map the customer environment, test a representative workflow and review out"
+  },
+  {
+    "page": 5,
+    "y": 194,
+    "bottom": 222.4,
+    "text": "<b>Capacity for larger teams.</b> Start with 3,000 invoices and 40 users mo"
+  },
+  {
+    "page": 5,
+    "y": 231.4,
+    "bottom": 259.8,
+    "text": "<b>Two standard connections.</b> Configure up to two supported accounting c"
+  },
+  {
+    "page": 5,
+    "y": 268.8,
+    "bottom": 297.2,
+    "text": "<b>Structured implementation.</b> Include a mapping workshop, acceptance ch"
+  },
+  {
+    "page": 5,
+    "y": 306.2,
+    "bottom": 334.6,
+    "text": "<b>Reviewable exchange.</b> Use import staging, approved export snapshots, "
+  },
+  {
+    "page": 5,
+    "y": 736,
+    "bottom": 760,
+    "text": "Existing posted financial records are not silently overwritten. An uncertai"
+  },
+  {
+    "page": 6,
+    "y": 101,
+    "bottom": 131,
+    "text": "Bring trip operations into financial view."
+  },
+  {
+    "page": 6,
+    "y": 143,
+    "bottom": 157.4,
+    "text": "An optional transport workflow for tracking trip revenue, reviewed costs, d"
+  },
+  {
+    "page": 6,
+    "y": 263,
+    "bottom": 275,
+    "text": "Pro add-on: \u20b92,999 / month for the same starting allowance."
+  },
+  {
+    "page": 6,
+    "y": 310,
+    "bottom": 338.4,
+    "text": "<b>Vehicle and driver records.</b> Maintain the operational directory and s"
+  },
+  {
+    "page": 6,
+    "y": 353.4,
+    "bottom": 381.8,
+    "text": "<b>Trip milestones.</b> Track transport orders, dispatch progress and deliv"
+  },
+  {
+    "page": 6,
+    "y": 396.8,
+    "bottom": 425.2,
+    "text": "<b>Reviewed trip costs.</b> Capture fuel, toll, repair and other expense ev"
+  },
+  {
+    "page": 6,
+    "y": 440.2,
+    "bottom": 468.6,
+    "text": "<b>Trip performance.</b> Review operational margin reports using recorded i"
+  },
+  {
+    "page": 6,
+    "y": 310,
+    "bottom": 338.4,
+    "text": "<b>Driver earnings.</b> Apply supported per-trip or per-kilometre pay polic"
+  },
+  {
+    "page": 6,
+    "y": 353.4,
+    "bottom": 381.8,
+    "text": "<b>Advances and recovery.</b> Review advances, recoveries and driver settle"
+  },
+  {
+    "page": 6,
+    "y": 396.8,
+    "bottom": 425.2,
+    "text": "<b>Customer collections.</b> Track transport customer invoices, receipts an"
+  },
+  {
+    "page": 6,
+    "y": 440.2,
+    "bottom": 468.6,
+    "text": "<b>Follow-ups.</b> Keep missing documents and unresolved settlement work vi"
+  },
+  {
+    "page": 6,
+    "y": 703,
+    "bottom": 731,
+    "text": "The fleet module and usage allowances require acceptance and configuration."
+  },
+  {
+    "page": 7,
+    "y": 101,
+    "bottom": 131,
+    "text": "Clear allowances. Predictable expansion."
+  },
+  {
+    "page": 7,
+    "y": 143,
+    "bottom": 157.4,
+    "text": "Choose capacity explicitly as your business grows. Additional scope is conf"
+  },
+  {
+    "page": 7,
+    "y": 521.7,
+    "bottom": 548.7,
+    "text": "<b>Invoice allowance.</b> One distinct accepted supplier invoice consumes o"
+  },
+  {
+    "page": 7,
+    "y": 556.7,
+    "bottom": 583.6,
+    "text": "<b>AI allowance.</b> One extraction of up to five source pages is included "
+  },
+  {
+    "page": 7,
+    "y": 591.6,
+    "bottom": 618.6,
+    "text": "<b>Monthly reset.</b> Invoice packs apply to the subscription month and do "
+  },
+  {
+    "page": 7,
+    "y": 626.6,
+    "bottom": 653.6,
+    "text": "<b>User seats.</b> Owners, finance users, approvers and auditors count as i"
+  },
+  {
+    "page": 7,
+    "y": 661.6,
+    "bottom": 688.6,
+    "text": "<b>Additional limits.</b> Storage, retention, file-size, API and webhook al"
+  },
+  {
+    "page": 8,
+    "y": 101,
+    "bottom": 131,
+    "text": "Start with your real invoice workflow."
+  },
+  {
+    "page": 8,
+    "y": 143,
+    "bottom": 157.4,
+    "text": "A focused demonstration and a representative pilot establish scope before a"
+  },
+  {
+    "page": 8,
+    "y": 216,
+    "bottom": 229.5,
+    "text": "Confirm monthly volumes, users, legal entities, approval steps and accounti"
+  },
+  {
+    "page": 8,
+    "y": 286,
+    "bottom": 299.5,
+    "text": "Prepare supplier data, matching settings, roles, intake and agreed accounti"
+  },
+  {
+    "page": 8,
+    "y": 356,
+    "bottom": 369.5,
+    "text": "Walk through representative invoices, partial receipts, exceptions, approva"
+  },
+  {
+    "page": 8,
+    "y": 426,
+    "bottom": 439.5,
+    "text": "Confirm written scope and readiness, train the team and activate the agreed"
+  },
+  {
+    "page": 8,
+    "y": 522,
+    "bottom": 535.5,
+    "text": "<b>Commercial scope.</b> Plan, allowances, onboarding, integrations, suppor"
+  },
+  {
+    "page": 8,
+    "y": 543.5,
+    "bottom": 570.5,
+    "text": "<b>Data and service terms.</b> Storage/retention, security and deployment r"
+  },
+  {
+    "page": 8,
+    "y": 578.5,
+    "bottom": 605.5,
+    "text": "<b>Feature acceptance.</b> Proposed packaging is not a declaration that eve"
+  },
+  {
+    "page": 8,
+    "y": 617.5,
+    "bottom": 642.5,
+    "text": "SSO, consolidated multi-company reporting, verified GST checks, advanced ba"
+  },
+  {
+    "page": 8,
+    "y": 749,
+    "bottom": 761,
+    "text": "Ask your KriyoPay representative for a workflow demonstration and a written"
+  }
+]

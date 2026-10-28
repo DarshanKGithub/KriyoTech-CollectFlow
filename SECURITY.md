@@ -1,0 +1,3 @@
+# Admin Security
+
+Every control-plane view enforces `IsAuthenticated` plus active `AdminStaff`. Role checks are server-side. Tenant context headers are ignored by admin APIs. Company IDs are resolved from server-side records; related updates validate ownership. Admin changes are audited transactionally. Logs exclude passwords, tokens, gateway secrets, and raw payment credentials. Financial and company deletion are intentionally unavailable. SUPER_ADMIN/BILLING_ADMIN 2FA is a release requirement; until implemented, this panel must remain restricted to trusted local/internal deployment and must not be treated as production-ready.

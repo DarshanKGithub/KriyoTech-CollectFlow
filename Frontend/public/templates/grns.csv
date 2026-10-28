@@ -1,0 +1,2 @@
+grn_number,po_number,received_at,po_line_no,item_code,description,quantity_received,uom
+GRN-2026-001,PO-2026-001,2026-10-03,1,ITEM-001,Industrial component,100,EA

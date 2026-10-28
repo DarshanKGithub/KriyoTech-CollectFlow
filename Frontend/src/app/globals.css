@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+* { box-sizing: border-box; }
+body { margin: 0; background: #f5f7f5; color: #172b27; font-family: Arial, Helvetica, sans-serif; }
+button, input { font: inherit; }
+
+@layer base {
+  :root {
+    --background: 0 0% 100%; --foreground: 164 30% 13%;
+    --card: 0 0% 100%; --card-foreground: 164 30% 13%;
+    --popover: 0 0% 100%; --popover-foreground: 164 30% 13%;
+    --primary: 164 66% 25%; --primary-foreground: 0 0% 100%;
+    --secondary: 150 16% 96%; --secondary-foreground: 164 30% 18%;
+    --muted: 150 12% 96%; --muted-foreground: 158 7% 44%;
+    --accent: 151 35% 94%; --accent-foreground: 164 66% 25%;
+    --destructive: 0 69% 48%; --destructive-foreground: 0 0% 100%;
+    --border: 150 12% 90%; --input: 150 12% 86%; --ring: 164 66% 25%; --radius: .7rem;
+  }
+}
+
+/* Shared dark theme for shadcn primitives and legacy utility-styled pages. */
+html.dark {
+  --background: 153 24% 8%; --foreground: 144 26% 93%;
+  --card: 152 21% 12%; --card-foreground: 144 26% 93%;
+  --popover: 152 21% 12%; --popover-foreground: 144 26% 93%;
+  --primary: 160 55% 64%; --primary-foreground: 153 35% 10%;
+  --secondary: 151 22% 17%; --secondary-foreground: 144 26% 93%;
+  --muted: 151 19% 17%; --muted-foreground: 145 14% 69%;
+  --accent: 152 24% 21%; --accent-foreground: 160 55% 73%;
+  --destructive: 348 65% 55%; --destructive-foreground: 0 0% 100%;
+  --border: 149 17% 24%; --input: 149 17% 28%; --ring: 160 55% 64%;
+  color-scheme: dark;
+}
+html.dark body { background: #101a17; color: #e7f1eb; }
+html.dark :is(.bg-white, .bg-white\/95, .bg-white\/90, .bg-slate-50, .bg-gray-50) { background-color: #18251f !important; }
+html.dark :is(.bg-canvas, .bg-\[\#f6f8f7\], .bg-\[\#f5f7f5\]) { background-color: #101a17 !important; }
+html.dark :is(.bg-slate-100, .bg-slate-200, .bg-mint, .bg-emerald-50, .bg-emerald-50\/60, .bg-emerald-50\/70, .bg-emerald-100) { background-color: #233b30 !important; }
+html.dark :is(.text-ink, .text-slate-900, .text-slate-800, .text-slate-700, .text-gray-900) { color: #e7f1eb !important; }
+html.dark :is(.text-slate-600, .text-slate-500, .text-slate-400, .text-gray-500) { color: #a4b8ad !important; }
+html.dark :is(.text-forest, .text-emerald-800, .text-emerald-700) { color: #80dfbc !important; }
+html.dark :is(.border-line, .border-slate-200, .border-emerald-100, .border-emerald-200) { border-color: #33483d !important; }
+html.dark .divide-line > :not([hidden]) ~ :not([hidden]) { border-color: #33483d; }
+html.dark :is(.hover\:bg-slate-50, .hover\:bg-slate-100):hover { background-color: #233b30 !important; }
+html.dark .admin-content .MuiDataGrid-columnHeaders,
+html.dark .admin-content thead th { background: #20322a; color: #a4b8ad; }
+html.dark .admin-content .MuiDataGrid-columnHeaderTitle { color: #a4b8ad; }
+html.dark .admin-content .MuiDataGrid-cell { border-color: #33483d; }
+html.dark .admin-content .MuiDataGrid-row:hover { background: #233b30; }
+html.dark .MuiChartsAxis-tickLabel, html.dark .MuiChartsLegend-label { fill: #a4b8ad !important; }
+html.dark .MuiChartsGrid-line { stroke: #33483d !important; }
+@layer base {
+  html.dark * { border-color: hsl(var(--border)); }
+}

@@ -1,0 +1,2 @@
+po_number,vendor_code,order_date,line_no,item_code,description,quantity,uom,rate,taxable_value,gst_rate
+PO-2026-001,V001,2026-10-01,1,ITEM-001,Industrial component,100,EA,250.00,25000.00,18

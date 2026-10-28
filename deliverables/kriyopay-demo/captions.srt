@@ -1,0 +1,59 @@
+1
+00:00:00,000 --> 00:00:06,000
+Meet KriyoPay. Connect invoice processing, transport operations, driver settlements, and financial controls in one organized workspace.
+
+2
+00:00:06,000 --> 00:00:12,000
+Start with your overview and attention inbox. Find invoice issues, pending approvals, overdue payments, fleet follow-ups, and outstanding salaries.
+
+3
+00:00:12,000 --> 00:00:18,000
+Upload invoices or bring them in through email. Automatic extraction prepares editable fields, with confidence flags, duplicate review, and clear retry options.
+
+4
+00:00:18,000 --> 00:00:24,000
+Connect supplier invoices with purchase orders and goods receipts. Manage vendors, aliases, financial notes, and portal access while reviewing differences.
+
+5
+00:00:24,000 --> 00:00:30,000
+Route exceptions, prepare follow-up drafts, and apply approval and SLA rules. People make approval decisions, with activity history for accountability.
+
+6
+00:00:30,000 --> 00:00:36,000
+Record payments and allocations, then reconcile imported bank transactions against supplier payments, customer collections, and driver settlements, with duplicate protection.
+
+7
+00:00:36,000 --> 00:00:42,000
+Manage trucks, drivers, and customers. Turn transport orders into assigned trips, and coordinate the day from the dispatch board.
+
+8
+00:00:42,000 --> 00:00:48,000
+Drivers update trips from a phone: pickup and delivery, odometer readings, receipts, photos, and signatures. Save updates offline and sync later.
+
+9
+00:00:48,000 --> 00:00:54,000
+Track fuel and trip expenses against budgets. Review mileage, profitability, and low-margin alerts to investigate unusual costs and missing records.
+
+10
+00:00:54,000 --> 00:01:00,000
+Calculate driver pay using monthly, trip, or kilometre policies. Track advances, approved deductions, payments, reversals, and balances in an exportable ledger.
+
+11
+00:01:00,000 --> 00:01:06,000
+Connect completed transport work to customer invoices. Record collections, follow outstanding balances, and carry that context into reconciliation.
+
+12
+00:01:06,000 --> 00:01:12,000
+Review operational and financial reports. Export trip costs, salary balances, exceptions, and payment status, with tax review, Tally exports, and audit history.
+
+13
+00:01:12,000 --> 00:01:18,000
+Configure email intake, API access, webhooks, WhatsApp workflows, and custom fields. Choose reminder recipients, channels, and escalation rules for overdue work.
+
+14
+00:01:18,000 --> 00:01:24,000
+Control workspace roles, branches, settings, and billing. Internal admins manage companies, fleet access, plans, subscriptions, usage, payment records, and security.
+
+15
+00:01:24,000 --> 00:01:30,000
+KriyoPay brings finance and transport workflows together. Explore a guided walkthrough tailored to your team, your operations, and your next stage of growth.

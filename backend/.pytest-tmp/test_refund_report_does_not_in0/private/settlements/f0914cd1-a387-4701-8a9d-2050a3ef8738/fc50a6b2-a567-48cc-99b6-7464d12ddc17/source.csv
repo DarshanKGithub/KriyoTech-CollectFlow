@@ -1,0 +1,2 @@
+record_type,external_id,currency,amount,payment_reference
+REFUND,rfnd_source,INR,10,pay_source

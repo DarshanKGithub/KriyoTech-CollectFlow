@@ -1,0 +1,353 @@
+[
+  {
+    "title": "One connected\noperation.",
+    "section": "MEET KRIYOPAY",
+    "subtitle": "Finance + fleet + control",
+    "kind": "hero",
+    "items": [
+      "Capture & review invoices",
+      "Plan & track transport",
+      "Settle & reconcile payments",
+      "Report with accountability"
+    ],
+    "tags": [
+      "Finance teams",
+      "Transport operators",
+      "Business owners"
+    ],
+    "voice": "Meet KriyoPay. Connect invoice processing, transport operations, driver settlements, and financial controls in one organized workspace."
+  },
+  {
+    "title": "Know what\nneeds action.",
+    "section": "01 / DAILY WORK",
+    "subtitle": "Overview & Needs attention",
+    "kind": "table",
+    "headers": [
+      "Priority",
+      "Action needed",
+      "Owner"
+    ],
+    "rows": [
+      [
+        "High",
+        "Invoice extraction failed",
+        "Finance"
+      ],
+      [
+        "High",
+        "Approval overdue",
+        "Approver"
+      ],
+      [
+        "Today",
+        "Delivery proof missing",
+        "Fleet"
+      ],
+      [
+        "Today",
+        "Salary balance due",
+        "Finance"
+      ]
+    ],
+    "items": [
+      "One attention inbox",
+      "Clear ownership",
+      "Follow-ups & notifications"
+    ],
+    "tags": [
+      "Invoice review",
+      "Exceptions",
+      "Approvals",
+      "Overdue payments",
+      "Fleet follow-ups"
+    ],
+    "voice": "Start with your overview and attention inbox. Find invoice issues, pending approvals, overdue payments, fleet follow-ups, and outstanding salaries."
+  },
+  {
+    "title": "Upload once.\nFields extracted.",
+    "section": "02 / INVOICE INTAKE",
+    "subtitle": "From document to reviewable fields",
+    "kind": "invoice",
+    "items": [
+      "Upload or email intake",
+      "Automatic field extraction",
+      "Confidence flags & retry"
+    ],
+    "tags": [
+      "Processing status",
+      "Duplicate review",
+      "Bulk actions",
+      "AI review"
+    ],
+    "voice": "Upload invoices or bring them in through email. Automatic extraction prepares editable fields, with confidence flags, duplicate review, and clear retry options."
+  },
+  {
+    "title": "Match with\nthe evidence.",
+    "section": "03 / PROCUREMENT",
+    "subtitle": "Invoice · Purchase order · Goods receipt",
+    "kind": "flow",
+    "items": [
+      "Purchase orders",
+      "Goods received",
+      "Invoice matching",
+      "Resolve differences"
+    ],
+    "tags": [
+      "Vendors",
+      "Vendor aliases",
+      "Vendor portal",
+      "Credit & debit notes"
+    ],
+    "voice": "Connect supplier invoices with purchase orders and goods receipts. Manage vendors, aliases, financial notes, and portal access while reviewing differences."
+  },
+  {
+    "title": "Keep people\nin control.",
+    "section": "04 / REVIEW & APPROVAL",
+    "subtitle": "Exceptions to reviewed decisions",
+    "kind": "flow",
+    "items": [
+      "Flag exception",
+      "Draft follow-up",
+      "Route for approval",
+      "Record decision"
+    ],
+    "tags": [
+      "Approval rules",
+      "SLA rules",
+      "Human approval",
+      "Activity history"
+    ],
+    "voice": "Route exceptions, prepare follow-up drafts, and apply approval and SLA rules. People make approval decisions, with activity history for accountability."
+  },
+  {
+    "title": "Close the loop\non payments.",
+    "section": "05 / PAYMENTS",
+    "subtitle": "Recorded payments & bank reconciliation",
+    "kind": "table",
+    "headers": [
+      "Bank transaction",
+      "Recorded payment",
+      "Review"
+    ],
+    "rows": [
+      [
+        "Supplier debit",
+        "Invoice payment",
+        "Candidate"
+      ],
+      [
+        "Customer credit",
+        "Collection",
+        "Candidate"
+      ],
+      [
+        "Driver debit",
+        "Salary payment",
+        "Candidate"
+      ],
+      [
+        "Unmatched entry",
+        "Needs investigation",
+        "Review"
+      ]
+    ],
+    "items": [
+      "Payment allocations",
+      "Duplicate protection",
+      "Confirm bank matches"
+    ],
+    "tags": [
+      "CSV / XLSX import",
+      "Customer collections",
+      "Driver payments"
+    ],
+    "voice": "Record payments and allocations, then reconcile imported bank transactions against supplier payments, customer collections, and driver settlements, with duplicate protection."
+  },
+  {
+    "title": "Plan the load.\nAssign the trip.",
+    "section": "06 / FLEET PLANNING",
+    "subtitle": "Customers → orders → dispatch",
+    "kind": "board",
+    "items": [
+      "Trucks & drivers",
+      "Customer directory",
+      "Transport orders",
+      "Create & assign trips"
+    ],
+    "tags": [
+      "Dispatch board",
+      "Trip list",
+      "Dedicated feature pages"
+    ],
+    "voice": "Manage trucks, drivers, and customers. Turn transport orders into assigned trips, and coordinate the day from the dispatch board."
+  },
+  {
+    "title": "Updates from\nthe road.",
+    "section": "07 / DRIVER EXPERIENCE",
+    "subtitle": "Phone-friendly trip updates",
+    "kind": "mobile",
+    "items": [
+      "Pickup & delivery check-ins",
+      "Odometer readings",
+      "Receipts & delivery proof",
+      "Offline save & later sync"
+    ],
+    "tags": [
+      "Delivery photo",
+      "Customer signature",
+      "Assigned trips"
+    ],
+    "voice": "Drivers update trips from a phone: pickup and delivery, odometer readings, receipts, photos, and signatures. Save updates offline and sync later."
+  },
+  {
+    "title": "See where\nthe money goes.",
+    "section": "08 / TRIP COST CONTROL",
+    "subtitle": "Trip costs, mileage & profitability",
+    "kind": "cost",
+    "items": [
+      "Fuel & expense budgets",
+      "Mileage monitoring",
+      "Profitability alerts"
+    ],
+    "tags": [
+      "Trip reports",
+      "Low-margin alerts",
+      "Missing-record follow-ups"
+    ],
+    "voice": "Track fuel and trip expenses against budgets. Review mileage, profitability, and low-margin alerts to investigate unusual costs and missing records."
+  },
+  {
+    "title": "Every driver.\nA clear balance.",
+    "section": "09 / DRIVER FINANCE",
+    "subtitle": "Earnings → settlement → ledger",
+    "kind": "ledger",
+    "items": [
+      "Monthly, trip & kilometre pay",
+      "Advances & recoveries",
+      "Approved deductions",
+      "Audited corrections & reversals"
+    ],
+    "tags": [
+      "Evidence & reviewer approval",
+      "Salary payments",
+      "Date-range ledger export"
+    ],
+    "voice": "Calculate driver pay using monthly, trip, or kilometre policies. Track advances, approved deductions, payments, reversals, and balances in an exportable ledger."
+  },
+  {
+    "title": "Delivered.\nBilled. Collected.",
+    "section": "10 / CUSTOMER BILLING",
+    "subtitle": "Transport work to customer collections",
+    "kind": "flow",
+    "items": [
+      "Complete trip",
+      "Prepare invoice",
+      "Record collection",
+      "Track outstanding"
+    ],
+    "tags": [
+      "Customer invoices",
+      "Trip billing context",
+      "Collection reconciliation"
+    ],
+    "voice": "Connect completed transport work to customer invoices. Record collections, follow outstanding balances, and carry that context into reconciliation."
+  },
+  {
+    "title": "Clarity you\ncan share.",
+    "section": "11 / REPORTS & CONTROLS",
+    "subtitle": "Operational and financial visibility",
+    "kind": "report",
+    "items": [
+      "Trip costs & salary balances",
+      "Invoice exceptions & payment status",
+      "Tax review & audit history",
+      "Date-range exports"
+    ],
+    "tags": [
+      "Operational reports",
+      "Tally export",
+      "Recorded user actions"
+    ],
+    "voice": "Review operational and financial reports. Export trip costs, salary balances, exceptions, and payment status, with tax review, Tally exports, and audit history."
+  },
+  {
+    "title": "Connect tools.\nReduce chasing.",
+    "section": "12 / AUTOMATION",
+    "subtitle": "Integrations & reminder preferences",
+    "kind": "flow",
+    "items": [
+      "Email intake",
+      "API & webhooks",
+      "WhatsApp workflows",
+      "Reminder rules"
+    ],
+    "tags": [
+      "Custom fields",
+      "Recipients & channels",
+      "Escalations",
+      "Notifications"
+    ],
+    "voice": "Configure email intake, API access, webhooks, WhatsApp workflows, and custom fields. Choose reminder recipients, channels, and escalation rules for overdue work."
+  },
+  {
+    "title": "The right access.\nThe right setup.",
+    "section": "13 / ADMINISTRATION",
+    "subtitle": "Workspace controls & internal admin console",
+    "kind": "table",
+    "headers": [
+      "Workspace",
+      "Internal admin",
+      "Control"
+    ],
+    "rows": [
+      [
+        "Users & roles",
+        "Company onboarding",
+        "Access"
+      ],
+      [
+        "Branches & settings",
+        "Plans & feature access",
+        "Setup"
+      ],
+      [
+        "Billing & plan",
+        "Subscriptions & usage",
+        "Billing"
+      ],
+      [
+        "Role permissions",
+        "Security & audit logs",
+        "History"
+      ]
+    ],
+    "items": [
+      "View, edit, approve, pay & export",
+      "Fleet feature access",
+      "Company & subscription setup"
+    ],
+    "tags": [
+      "Staff roles",
+      "Payment records",
+      "Feature overrides"
+    ],
+    "voice": "Control workspace roles, branches, settings, and billing. Internal admins manage companies, fleet access, plans, subscriptions, usage, payment records, and security."
+  },
+  {
+    "title": "Less chasing.\nMore visibility.",
+    "section": "KRIYOPAY",
+    "subtitle": "See the workflow that matters to your team.",
+    "kind": "hero",
+    "items": [
+      "Invoices to reviewed records",
+      "Orders to completed trips",
+      "Earnings to settled balances",
+      "Operations to useful reports"
+    ],
+    "tags": [
+      "Book a guided walkthrough",
+      "Explore your own workflow"
+    ],
+    "voice": "KriyoPay brings finance and transport workflows together. Explore a guided walkthrough tailored to your team, your operations, and your next stage of growth."
+  }
+]

@@ -1,0 +1,2 @@
+Record payments and allocations, then reconcile imported bank transactions against supplier payments,
+customer collections, and driver settlements, with duplicate protection.

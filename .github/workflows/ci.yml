@@ -1,0 +1,37 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:18
+        env: {POSTGRES_DB: kriyopay, POSTGRES_USER: kriyopay, POSTGRES_PASSWORD: kriyopay}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U kriyopay" --health-interval 10s --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - run: python manage.py check
+        env: {POSTGRES_DB: kriyopay, POSTGRES_USER: kriyopay, POSTGRES_PASSWORD: kriyopay, POSTGRES_HOST: localhost}
+      - run: python manage.py makemigrations --check --dry-run
+        env: {POSTGRES_DB: kriyopay, POSTGRES_USER: kriyopay, POSTGRES_PASSWORD: kriyopay, POSTGRES_HOST: localhost}
+      - run: pytest
+        env: {POSTGRES_DB: kriyopay, POSTGRES_USER: kriyopay, POSTGRES_PASSWORD: kriyopay, POSTGRES_HOST: localhost, DJANGO_SECRET_KEY: ci-secret}
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: Frontend}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 20, cache: npm, cache-dependency-path: Frontend/package-lock.json}
+      - run: npm install
+      - run: npm run lint -- --no-cache
+      - run: npm run typecheck
+      - run: npm test -- --passWithNoTests

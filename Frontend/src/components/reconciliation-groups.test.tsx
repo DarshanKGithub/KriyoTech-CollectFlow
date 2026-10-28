@@ -1,0 +1,36 @@
+import React from "react";
+import { afterEach, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { ReconciliationGroups } from "./reconciliation-groups";
+import { apiFetch } from "@/lib/api";
+import type { BankRow } from "@/lib/finance";
+vi.mock("@/lib/api",()=>({apiFetch:vi.fn()}));
+const row:BankRow={id:"11111111-1111-4111-8111-111111111111",revision:0,date:"2026-10-26",description:"Transfer",reference:"UTR-1234",amount:"-100.00",currency:"INR",source_verified:true,status:"UNMATCHED",payment_id:null,transport_collection_id:null,driver_salary_payment_id:null,statement:"bank.csv"};
+const evidence={bank_ids:[row.id],banks:[{id:row.id,amount:"-100.00",reference:"UTR-1234",date:row.date}],targets:[{target_id:"22222222-2222-4222-8222-222222222222",target_type:"VENDOR_PAYMENT",amount:"60.00",payment_reference:"UTR-1234"},{target_id:"33333333-3333-4333-8333-333333333333",target_type:"VENDOR_PAYMENT",amount:"40.00",payment_reference:"UTR-1234"}],bank_total:"100.00",target_total:"100.00",components:{fees:"0.00",fee_tax:"0.00",refunds:"0.00",adjustments:"0.00"}};
+afterEach(()=>{cleanup();vi.clearAllMocks();});
+it("requires explicit zero components, previews totals, then requires review acknowledgment",async()=>{
+  vi.mocked(apiFetch).mockResolvedValue({ok:true,json:async()=>({preview:evidence,evidence_hash:"checked-hash",currency:"INR"})} as Response);
+  const changed=vi.fn().mockResolvedValue(undefined);
+  render(<ReconciliationGroups selected={row} canReview onChanged={changed}/>);
+  fireEvent.click(screen.getByText("Match split or combined payments"));
+  fireEvent.change(screen.getByLabelText("Internal record UUIDs"),{target:{value:evidence.targets.map(item=>item.target_id).join(",")}});
+  fireEvent.change(screen.getByLabelText(/Group review/),{target:{value:"Checked the full transfer report"}});
+  expect((screen.getByRole("button",{name:"Preview group"}) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByLabelText(/I verified fees/));
+  fireEvent.click(screen.getByRole("button",{name:"Preview group"}));
+  const record=await screen.findByRole("button",{name:"Record reviewed group"});
+  expect((record as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByLabelText(/I reviewed every member/));
+  fireEvent.click(record);
+  await waitFor(()=>expect(changed).toHaveBeenCalledTimes(1));
+  const calls=vi.mocked(apiFetch).mock.calls.map(([,init])=>JSON.parse(String(init?.body)));
+  expect(calls[0].action).toBe("group_preview");
+  expect(calls[1]).toEqual(expect.objectContaining({action:"group_match",expected_evidence_hash:"checked-hash",components:evidence.components}));
+});
+it("keeps auditors from confirming or clearing a group",async()=>{
+  vi.mocked(apiFetch).mockResolvedValue({ok:true,json:async()=>({id:"group",status:"MATCHED",revision:0,currency:"INR",evidence})} as Response);
+  render(<ReconciliationGroups selected={{...row,status:"MATCHED",group_id:"group"}} canReview={false} onChanged={async()=>{}}/>);
+  await screen.findByText("Exact group comparison");
+  expect(screen.queryByRole("button",{name:"Confirm complete group"})).toBeNull();
+  expect(screen.queryByRole("button",{name:"Clear complete group"})).toBeNull();
+});

@@ -1,0 +1,2 @@
+Configure email intake, API access, webhooks, WhatsApp workflows, and custom fields. Choose reminder
+recipients, channels, and escalation rules for overdue work.

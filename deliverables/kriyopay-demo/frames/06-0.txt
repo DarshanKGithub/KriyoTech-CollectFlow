@@ -1,0 +1,1 @@
+Manage trucks, drivers, and customers. Turn transport orders into assigned trips, and coordinate the day

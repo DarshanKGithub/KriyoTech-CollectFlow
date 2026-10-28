@@ -1,0 +1,2 @@
+Connect completed transport work to customer invoices. Record collections, follow outstanding balances,
+and carry that context into reconciliation.

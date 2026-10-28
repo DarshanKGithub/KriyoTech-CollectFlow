@@ -1,0 +1,2 @@
+Route exceptions, prepare follow-up drafts, and apply approval and SLA rules. People make approval
+decisions, with activity history for accountability.

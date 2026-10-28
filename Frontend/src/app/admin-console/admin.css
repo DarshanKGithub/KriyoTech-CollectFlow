@@ -1,0 +1,17 @@
+.admin-portal { font-family: Arial, Helvetica, sans-serif; -webkit-font-smoothing: antialiased; }
+.admin-portal button { cursor: pointer; }
+.admin-portal button:disabled { cursor: not-allowed; }
+.admin-content > div > h1, .admin-content > h1 { line-height: 1.25; }
+.admin-content .MuiDataGrid-root { border: 0; border-radius: 0; font-family: inherit; font-size: 12px; }
+.admin-content .MuiDataGrid-columnHeaders { background: #f7f9f8; }
+.admin-content .MuiDataGrid-columnHeaderTitle { font-size: 11px; font-weight: 600; color: #63716a; }
+.admin-content .MuiDataGrid-cell { border-color: #edf1ee; align-content: center; }
+.admin-content .MuiDataGrid-row:hover { background: #f7fbf9; }
+.admin-content .MuiDataGrid-toolbarContainer { padding: 12px 16px; border-bottom: 1px solid #e4e9e5; }
+.admin-content .MuiTablePagination-root { font-size: 12px; }
+.admin-content table { border-collapse: collapse; }
+.admin-content thead th { font-size: 10px; letter-spacing: .06em; font-weight: 600; color: #6b7871; background: #f7f9f8; }
+.admin-content tbody td { font-size: 12px; }
+.admin-content table tr:last-child { border-bottom: 0; }
+.admin-content [role="alert"] { overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .admin-portal *, .admin-portal *::before, .admin-portal *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }

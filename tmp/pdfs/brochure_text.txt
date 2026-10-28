@@ -1,0 +1,378 @@
+K
+KriyoPay
+INVOICE-TO-PAYMENT CONTROL FOR INDIAN BUSINESSES
+Every invoice.
+A clearer path to approval.
+Capture supplier invoices, match purchases and receipts, route approvals and
+prepare a reviewed accounting handoff.
+FROM DOCUMENT TO DECISION
+01
+Capture
+02
+Match
+03
+Approve
+04
+Export
+Record actual payments and retain the review trail throughout the process.
+CONTROL
+Compare invoices with purchase
+orders and goods receipts.
+COLLABORATION
+Bring finance, approvers and
+suppliers into a shared workflow.
+CONNECTION
+Prepare reviewed exports for your
+accounting system.
+Pricing & features
+Basic ₹2,999/month Pro ₹7,999/month
+Enterprise from ₹19,999/month
+Client discussion proposal. Proposed inclusions and rates are subject to written scope and availability confirmation. Applicable taxes are
+additional.
+KriyoPay  |  Commercial proposal  |  23 October 2026
+01 / 08
+
+K
+KriyoPay
+PLANS & PRICING
+Choose the capacity your team needs.
+Three proposed plans. A complete core workflow, with more automation and integration depth as you grow.
+KriyoPay  |  Commercial proposal  |  23 October 2026
+02 / 08
+BASIC
+₹2,999
+/ month
+₹29,990 / year
+250 invoices / month
+5 internal users
+Tally CSV export
+For small finance teams
+PRO
+₹7,999
+/ month
+₹79,990 / year
+1,000 invoices / month
+15 internal users
+1 accounting connector
+For growing finance teams
+ENTERPRISE
+FROM
+₹19,999
+/ month
+From ₹1,99,990 / year
+3,000 invoices / month
+40 internal users
+Up to 2 connectors
+For integration-led teams
+Commercial detail
+Basic
+Pro
+Enterprise
+Standard onboarding
+Included
+₹4,999 once
+From ₹19,999 once
+Baseline company scope
+1 workspace
+1 workspace
+1 workspace; more quoted
+First-response target*
+2 business days
+1 business day
+4 business hours, critical
+incidents
+Annual value: pay for 10 months and receive 12 months of subscription access. Invoice allowances still reset monthly.
+Enterprise figures are starting allocations; final scope is quoted.
+* Business hours: Monday-Friday, 9:30am-6pm IST, excluding published holidays. Response targets are not resolution guarantees. Accounting
+connections require setup and customer acceptance. All prices exclude applicable taxes.
+
+K
+KriyoPay
+FEATURE COMPARISON
+See what each plan includes.
+Proposed entitlements. Connection-dependent capabilities are activated after configuration and acceptance.
+KriyoPay  |  Commercial proposal  |  23 October 2026
+03 / 08
+Capability
+Basic
+Pro
+Enterprise
+Upload + reviewed AI extraction
+Included
+Included
+Included
+Supplier records + supporting files
+Included
+Included
+Included
+Purchase orders + partial GRNs
+Included
+Included
+Included
+Invoice / PO / receipt matching
+Included
+Included
+Included
+Duplicate screening + exceptions
+Included
+Included
+Included
+Multi-level approvals + activity history
+Included
+Included
+Included
+Configured email / Gmail intake
+Included
+Included
+Included
+Vendor portal + questions
+Included
+Included
+Included
+Payment recording + partial payments
+Included
+Included
+Included
+Credit / debit notes
+Included
+Included
+Included
+Standard reports + Tally CSV
+Included
+Included
+Included
+Custom fields + supported bulk actions
+-
+Included
+Included
+Eligible rule-based auto-approval
+-
+Validated rules
+Validated rules
+Statement reconciliation, CSV / XLSX
+-
+Exact matching
+Exact matching
+Tax checks + month-end checklist
+-
+Included
+Included
+Reviewed Tally accounting XML
+-
+Included
+Included
+Standard accounting connections
+CSV only
+1 connector
+Up to 2
+Read-only API + supported webhooks
+-
+Included
+Included
+Available advanced operational reports
+-
+Included
+Included
+Fleet & Trips module
+-
+Optional add-on
+25 vehicles / 500 trips
+Named implementation contact
+-
+-
+Included
+Quarterly adoption review
+-
+-
+Included
+GRN = goods receipt note. AI results require human review. API coverage is read-only; webhooks cover supported events. Tax checks
+screen format/arithmetic and do not verify government records or file returns.
+
+K
+KriyoPay
+BASIC & PRO IN PRACTICE
+A useful workflow at every stage.
+Give people a clear next action, from a new supplier document to an approved accounting export.
+KriyoPay  |  Commercial proposal  |  23 October 2026
+04 / 08
+BASIC  |  Control daily invoices
+PRO  |  Scale the finance workflow
+Capture with review. Upload documents or use
+configured intake. Check extracted values before
+relying on them.
+Match what was received. Compare the invoice,
+purchase order and partial goods receipts. Resolve
+quantity or amount differences.
+Route decisions. Use supported multi-level
+approvals, rejection and correction steps. Preserve
+the activity history.
+Work with suppliers. Receive portal submissions
+and resolve questions around invoice information.
+Track settlement. Record payment references,
+partial payments and remaining balances.
+Prepare the handoff. Export reviewed Tally-ready
+CSV with configured ledger mappings.
+Handle more work together. Process larger invoice
+volumes with more users, custom fields and
+supported bulk actions.
+Apply supported rules. Use eligible auto-approval
+only after rules and financial controls are validated.
+Reconcile statements. Import mapped CSV/XLSX
+statements and review exact amount matches against
+recorded transactions.
+Review month end. Use operational tax flags, the
+review checklist and available reports to focus
+follow-up work.
+Connect accounting. Add one supported TallyPrime,
+ERPNext or Zoho Books connection after acceptance
+testing.
+Share supported data. Use read-only API access
+and signed outgoing webhooks within verified
+coverage.
+Example: a supplier invoices 100 units, but only 80 are received. The matching workflow highlights the difference so the
+team can investigate and record a review decision before proceeding.
+Configured Gmail intake is bounded and read-only. Vendor portal access uses controlled links. Financial exports create accounting records;
+payment recording does not initiate a bank transfer.
+
+K
+KriyoPay
+ENTERPRISE & ACCOUNTING
+Connect with an acceptance plan.
+Map the customer environment, test a representative workflow and review outcomes before activating financial
+writes.
+KriyoPay  |  Commercial proposal  |  23 October 2026
+05 / 08
+Capacity for larger teams. Start with 3,000 invoices and 40 users monthly, then agree a larger allocation if
+needed.
+Two standard connections. Configure up to two supported accounting connections for the baseline company
+scope.
+Structured implementation. Include a mapping workshop, acceptance checklist, training and an
+implementation contact.
+Reviewable exchange. Use import staging, approved export snapshots, sync history and conflict handling within
+supported coverage.
+System
+Supported scope and setup considerations
+TallyPrime
+Reviewed CSV/XML and supported accounting reads/writes. Customer Tally endpoint and
+ledgers must be configured. Inventory PO/receipt writes are outside current coverage.
+ERPNext
+Supported imports and outbound draft documents. Validate company, item, account and tax
+mappings. Withholding export limitations apply.
+Zoho Books
+Supported vendor, PO, bill and payment records. Goods receipts use a separate Zoho
+Inventory connection. Withholding export limitations apply.
+Dynamics 365 Finance
+Available for separately scoped discovery and validation. Customer entities, dimensions,
+journals and metadata determine implementation effort.
+Included connection does not mean universal two-way sync. Final resource coverage, credentials, accounting
+mappings and any extra implementation work are agreed in writing. The customer supplies third-party licenses and
+access.
+Existing posted financial records are not silently overwritten. An uncertain remote write requires reconciliation before another attempt.
+Additional legal entities, consolidated reporting and bespoke integration work are separate scopes.
+
+K
+KriyoPay
+FLEET & TRIPS
+Bring trip operations into financial view.
+An optional transport workflow for tracking trip revenue, reviewed costs, driver earnings and collections.
+KriyoPay  |  Commercial proposal  |  23 October 2026
+06 / 08
+INCLUDED WITH ENTERPRISE
+25 active vehicles  |  500 new trips / month
+Pro add-on: ₹2,999 / month for the same starting allowance.
+Vehicle and driver records. Maintain the
+operational directory and supported assignments.
+Trip milestones. Track transport orders, dispatch
+progress and delivery proof.
+Reviewed trip costs. Capture fuel, toll, repair and
+other expense evidence for review.
+Trip performance. Review operational margin
+reports using recorded income and approved costs.
+Driver earnings. Apply supported per-trip or
+per-kilometre pay policies.
+Advances and recovery. Review advances,
+recoveries and driver settlement balances.
+Customer collections. Track transport customer
+invoices, receipts and outstanding amounts.
+Follow-ups. Keep missing documents and
+unresolved settlement work visible.
+Separate financial views: transport customer receivables and driver settlements remain distinct from supplier accounts
+payable. Supplier bills consume the AP allowance; new trips consume the fleet allowance.
+Scope to agree before activation
+The fleet module and usage allowances require acceptance and configuration. GPS hardware, live vehicle tracking, route
+optimization, statutory payroll and bank transfer execution are outside this offer. Larger fleets and trip volumes are quoted.
+
+K
+KriyoPay
+COMMERCIAL DETAILS
+Clear allowances. Predictable expansion.
+Choose capacity explicitly as your business grows. Additional scope is confirmed before purchase.
+KriyoPay  |  Commercial proposal  |  23 October 2026
+07 / 08
+Add-on
+Proposed charge
+Allowance / basis
+Basic invoice pack
+₹999
+100 additional invoices
+Pro invoice pack
+₹2,999
+500 additional invoices
+Enterprise invoice pack
+₹4,999
+1,000 additional invoices
+Additional internal user
+₹199 / month
+Per named user; capacity subject to plan
+Fleet & Trips on Pro
+₹2,999 / month
+25 active vehicles / 500 new trips
+Migration, extra entities or ERP work
+Written quote
+Scope agreed after discovery
+WhatsApp intake
+Separate quote
+Provider, setup and usage acceptance
+How usage works
+Invoice allowance. One distinct accepted supplier invoice consumes one unit. Failed uploads, rejected duplicates and
+field corrections do not consume another unit.
+AI allowance. One extraction of up to five source pages is included per invoice. Platform-failed retries do not consume
+another allowance. Larger documents and user-requested re-extractions need agreed pricing.
+Monthly reset. Invoice packs apply to the subscription month and do not roll over. Annual plans still receive monthly
+capacity.
+User seats. Owners, finance users, approvers and auditors count as internal users. Vendor portal identities do not
+consume internal seats.
+Additional limits. Storage, retention, file-size, API and webhook allowances are specified in the final service schedule;
+no unlimited-use promise is implied.
+All displayed rates are proposed and exclude applicable taxes. Invoice capacity purchases are explicit. Additional
+companies, third-party licenses, bespoke work and dedicated infrastructure are separately scoped.
+
+K
+KriyoPay
+YOUR NEXT STEP
+Start with your real invoice workflow.
+A focused demonstration and a representative pilot establish scope before a production rollout.
+KriyoPay  |  Commercial proposal  |  23 October 2026
+08 / 08
+01
+Discover
+Confirm monthly volumes, users, legal entities, approval steps and accounting systems.
+02
+Configure
+Prepare supplier data, matching settings, roles, intake and agreed accounting mappings.
+03
+Validate
+Walk through representative invoices, partial receipts, exceptions, approvals and exports.
+04
+Activate
+Confirm written scope and readiness, train the team and activate the agreed package.
+Confirm in the final proposal
+Commercial scope. Plan, allowances, onboarding, integrations, support hours, taxes and third-party charges.
+Data and service terms. Storage/retention, security and deployment readiness, cancellation, renewal, refunds and
+export arrangements.
+Feature acceptance. Proposed packaging is not a declaration that every capability is available in production.
+Connection and fleet activation require validation.
+SSO, consolidated multi-company reporting, verified GST checks, advanced bank matching and dedicated hosting are future or
+separately scoped options unless expressly confirmed. Operational tax checks do not constitute statutory filings.
+Let's map KriyoPay to your business.
+Ask your KriyoPay representative for a workflow demonstration and a written proposal.

@@ -1,0 +1,1 @@
+Connect supplier invoices with purchase orders and goods receipts. Manage vendors, aliases, financial

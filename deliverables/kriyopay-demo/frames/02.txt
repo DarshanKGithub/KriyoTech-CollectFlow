@@ -1,0 +1,2 @@
+Upload invoices or bring them in through email. Automatic extraction prepares editable fields, with
+confidence flags, duplicate review, and clear retry options.

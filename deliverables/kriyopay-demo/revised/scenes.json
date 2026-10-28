@@ -1,0 +1,164 @@
+[
+  {
+    "card": 0,
+    "voice": "Welcome to KriyoPay. Let us take a slower look at how the product connects invoice processing, transport operations, and financial control."
+  },
+  {
+    "title": "Your workspace, at a glance",
+    "image": "01-overview.jpg",
+    "voice": "This is the actual KriyoPay workspace. The dashboard brings invoice activity, open exceptions, and pending approvals into one place.",
+    "crop": [
+      0,
+      0,
+      1600,
+      570
+    ],
+    "note": "ACTUAL PRODUCT · SAMPLE WORKFLOW"
+  },
+  {
+    "title": "1. Choose a sample invoice",
+    "image": "DEMO-VIDEO-INVOICE.png",
+    "voice": "For this demonstration, we use a clearly marked sample invoice. It contains two tyre services, a taxable value of twelve thousand rupees, and a total of fourteen thousand, one hundred and sixty rupees.",
+    "crop": null,
+    "note": "SYNTHETIC INVOICE · NO PAYMENT DUE"
+  },
+  {
+    "title": "2. Upload the invoice",
+    "image": "02-invoice-upload.jpg",
+    "voice": "Open Invoices and choose Upload invoice. Select the document. KriyoPay creates the invoice record and queues extraction automatically.",
+    "crop": [
+      270,
+      0,
+      1600,
+      250
+    ],
+    "note": "ACTUAL PRODUCT · SAMPLE WORKFLOW"
+  },
+  {
+    "title": "3. Extraction runs in the background",
+    "image": "04-extracting.jpg",
+    "voice": "The status changes to Extracting. There is no separate extraction button to press after upload. Processing time depends on the document and the extraction provider.",
+    "crop": [
+      270,
+      0,
+      1600,
+      405
+    ],
+    "note": "ACTUAL PRODUCT · SAMPLE WORKFLOW"
+  },
+  {
+    "title": "4. Review the extracted result",
+    "image": "05-extracted.jpg",
+    "voice": "Here is the extracted supplier, invoice number, date, and total. This recording needed one retry after a provider timeout. Waiting time has been shortened in this video.",
+    "crop": [
+      270,
+      0,
+      1600,
+      405
+    ],
+    "note": "ACTUAL PRODUCT · SAMPLE WORKFLOW"
+  },
+  {
+    "title": "5. Check the fields against the source",
+    "image": "06-review-fields.jpg",
+    "voice": "Open Review to inspect the extracted fields and line items. Confidence is only a model estimate. Your team still checks the source document before proceeding.",
+    "crop": [
+      415,
+      154,
+      1185,
+      848
+    ],
+    "note": "ACTUAL PRODUCT · SAMPLE WORKFLOW"
+  },
+  {
+    "title": "6. Correct a field, then save",
+    "image": "07-reviewed-tax.jpg",
+    "voice": "In this example, the line tax needs correction. We enter eighteen percent and two thousand, one hundred and sixty rupees, then save. Human review remains part of the workflow.",
+    "crop": [
+      415,
+      154,
+      1185,
+      848
+    ],
+    "note": "ACTUAL PRODUCT · SAMPLE WORKFLOW"
+  },
+  {
+    "card": 3,
+    "voice": "After review, compare the invoice with purchase orders and goods receipts. Vendor records, aliases, financial notes, and the vendor portal keep supporting information organized."
+  },
+  {
+    "card": 4,
+    "voice": "Differences go into the exception workflow. Follow-up drafts, approval rules, and service-level reminders help the right person take the next action. Approval remains a human decision."
+  },
+  {
+    "title": "7. Set up trucks and drivers",
+    "image": "08-fleet-setup.jpg",
+    "voice": "Now let us move to transportation. Add each truck and driver once. For this walkthrough, we use clearly labeled demo records with no real driver contact details.",
+    "crop": null,
+    "note": "ACTUAL PRODUCT · SAMPLE WORKFLOW"
+  },
+  {
+    "title": "8. Plan a transport trip",
+    "image": "09-trip-form.jpg",
+    "voice": "Choose the truck and driver. Enter a trip reference, pickup location, delivery location, and starting odometer. A transport order can be linked when needed.",
+    "crop": null,
+    "note": "ACTUAL PRODUCT · SAMPLE WORKFLOW"
+  },
+  {
+    "title": "9. Save and track the trip",
+    "image": "10-trip-created.jpg",
+    "voice": "Save the trip to create an operational record. The trip list gives the team a place to open the journey, update its status, and follow the work.",
+    "crop": null,
+    "note": "ACTUAL PRODUCT · SAMPLE WORKFLOW"
+  },
+  {
+    "title": "10. Start the journey",
+    "image": "11-trip-started.jpg",
+    "voice": "When the vehicle leaves, start the trip. The status change is recorded in the product, so the operations team can see that the journey is in progress.",
+    "crop": null,
+    "note": "ACTUAL PRODUCT · SAMPLE WORKFLOW"
+  },
+  {
+    "title": "11. Review trip details",
+    "image": "12-trip-detail.jpg",
+    "voice": "The trip page keeps the route, driver, revenue, expenses, and follow-ups together. Delivery updates and supporting evidence help connect operations with finance.",
+    "crop": null,
+    "note": "ACTUAL PRODUCT · SAMPLE WORKFLOW"
+  },
+  {
+    "card": 7,
+    "voice": "The phone-friendly driver view supports check-ins, odometer readings, receipts, and delivery proof. Drivers can save updates when connectivity is poor and sync them later."
+  },
+  {
+    "card": 8,
+    "voice": "Review fuel spending, recorded expenses, and trip profitability. Budgets and mileage alerts help your team investigate unusual costs and missing information."
+  },
+  {
+    "card": 9,
+    "voice": "Driver finance tracks earnings, advances, recoveries, approved deductions, and payments. Monthly, per-trip, and per-kilometre policies support a clear settlement balance and ledger export."
+  },
+  {
+    "card": 10,
+    "voice": "Connect completed trips with customer invoices and collections. Track outstanding amounts and keep the transport context available during payment review."
+  },
+  {
+    "card": 5,
+    "voice": "Record supplier payments, customer collections, and driver payments. Import bank transactions and review suggested matches. Reconciliation records do not execute a bank transfer."
+  },
+  {
+    "card": 11,
+    "voice": "Use reports to review trip costs, salary balances, invoice exceptions, and payment status. Export by date range, review tax information, and follow the audit history."
+  },
+  {
+    "card": 12,
+    "voice": "Configure email intake, API connections, webhooks, and WhatsApp workflows. Reminder preferences control recipients, channels, and escalation. External integrations require setup."
+  },
+  {
+    "card": 13,
+    "voice": "Roles control who can view, edit, approve, pay, and export. Administrators manage companies, feature access, plans, subscriptions, usage, and workspace settings."
+  },
+  {
+    "card": 14,
+    "voice": "That is KriyoPay. A connected workspace for invoices, transportation, and financial visibility. The next step is a guided walkthrough using the workflows that matter most to your team."
+  }
+]

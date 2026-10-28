@@ -1,0 +1,2 @@
+Calculate driver pay using monthly, trip, or kilometre policies. Track advances, approved deductions,
+payments, reversals, and balances in an exportable ledger.
