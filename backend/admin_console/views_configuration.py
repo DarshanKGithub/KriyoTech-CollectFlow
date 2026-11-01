@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -5,7 +6,14 @@ from .permissions import IsAdminStaff
 from .configuration import config_service
 from .models import AdminStaff
 from rest_framework.exceptions import ValidationError
-class ConfigurationView(APIView):
+class ConfigurationAPI(APIView):
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if request.method in {"POST", "PATCH"} and not isinstance(request.data, Mapping):
+            raise ValidationError("Send an object with named fields.")
+
+
+class ConfigurationView(ConfigurationAPI):
     """API endpoints for configuration management."""
 
     permission_classes = [IsAdminStaff]
@@ -31,13 +39,13 @@ class ConfigurationView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            if not feature_overrides:
+            if not isinstance(feature_overrides, list) or not feature_overrides or len(feature_overrides) > 100 or any(not isinstance(row, dict) for row in feature_overrides):
                 return Response(
                     {"error": "feature_overrides is required and cannot be empty."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            result = config_service.create_tenant_configuration(tenant_id, feature_overrides)
+            result = config_service.create_tenant_configuration(tenant_id, feature_overrides, actor=request.user)
             if "errors" in result:
                 return Response(
                     {"errors": result["errors"]},
@@ -53,7 +61,7 @@ class ConfigurationView(APIView):
                 {"error": f"Failed to create configuration: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-class PlanFeaturesView(APIView):
+class PlanFeaturesView(ConfigurationAPI):
     """API endpoints for plan features."""
 
     permission_classes = [IsAdminStaff]
@@ -71,7 +79,7 @@ class PlanFeaturesView(APIView):
                 {"error": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-class TenantConfigurationView(APIView):
+class TenantConfigurationView(ConfigurationAPI):
     """API endpoints for tenant-specific configuration."""
 
     permission_classes = [IsAdminStaff]
@@ -101,13 +109,13 @@ class TenantConfigurationView(APIView):
         try:
             updates = request.data.get("updates", [])
 
-            if not updates:
+            if not isinstance(updates, list) or not updates or len(updates) > 100 or any(not isinstance(row, dict) for row in updates):
                 return Response(
                     {"error": "updates is required and cannot be empty."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            result = config_service.bulk_update_features(tenant_id, updates)
+            result = config_service.bulk_update_features(tenant_id, updates, actor=request.user)
 
             if result["error_count"] > 0:
                 return Response(
@@ -151,26 +159,16 @@ class TenantConfigurationView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            if not reason or len(reason.strip()) < 8:
+            if not isinstance(reason, str) or len(reason.strip()) < 8:
                 return Response(
                     {"error": "reason must be at least 8 characters."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Convert expires_at string to datetime if provided
-            from django.utils.dateparse import parse_datetime
-            if expires_at:
-                expires_at = parse_datetime(expires_at)
-                if not expires_at:
-                    return Response(
-                        {"error": "expires_at must be a valid ISO datetime."},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
             override = config_service.set_feature_override(
-                tenant_id=tenant_id,
+                tenant_or_id=tenant_id,
                 feature_key=feature_key,
-                enabled=bool(enabled),
+                enabled=enabled,
                 limit_value=limit_value,
                 limit_period=limit_period,
                 reason=reason,
@@ -195,7 +193,7 @@ class TenantConfigurationView(APIView):
                 {"error": f"Failed to create feature override: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-class ConfigurationHistoryView(APIView):
+class ConfigurationHistoryView(ConfigurationAPI):
     """API endpoints for configuration history."""
 
     permission_classes = [IsAdminStaff]
@@ -212,7 +210,7 @@ class ConfigurationHistoryView(APIView):
                 {"error": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-class ConfigurationCacheView(APIView):
+class ConfigurationCacheView(ConfigurationAPI):
     """API endpoints for configuration cache management."""
 
     permission_classes = [IsAdminStaff]

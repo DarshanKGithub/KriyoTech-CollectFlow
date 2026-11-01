@@ -1,5 +1,6 @@
 from decimal import Decimal
 import pytest
+from django.db import connection
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from datetime import timedelta
@@ -12,6 +13,7 @@ from tenants.models import Tenant, Branch
 from vendors.models import Vendor
 from procurement.models import PurchaseOrder, PurchaseOrderLine, GRN, GRNLine
 from .models import BankStatement, BankTransaction, TaxReview, VendorPortalInvite, AIReviewSuggestion, TenantAPIKey, WebhookEndpoint, WebhookDelivery, GmailConnection
+from admin_console.models import Feature, Plan, PlanFeature, Subscription
 
 
 @pytest.fixture
@@ -52,6 +54,7 @@ def test_workspace_login_discovers_companies_and_self_signup_is_disabled(finance
 
 @pytest.mark.django_db
 def test_branch_creation_assignment_and_tenant_isolation(finance_client):
+    from django.core.exceptions import ValidationError
     tenant, owner, client = finance_client
     # Upgrade the fixture membership to owner; branch administration is owner-only.
     Membership.objects.filter(tenant=tenant, user=owner).update(role="OWNER")
@@ -67,6 +70,8 @@ def test_branch_creation_assignment_and_tenant_isolation(finance_client):
     hidden_branch = Branch.objects.get(tenant=outsider, is_default=True)
     denied = client.post("/api/v1/branch-assignments", {"membership_id": str(membership.id), "branch_id": str(hidden_branch.id)}, format="json", HTTP_X_WORKSPACE=tenant.workspace_key)
     assert denied.status_code == 404
+    with pytest.raises(ValidationError):
+        BranchMembership.objects.create(membership=membership, branch=hidden_branch)
     listed = client.get("/api/v1/branches", HTTP_X_WORKSPACE=tenant.workspace_key)
     assert listed.status_code == 200 and any(row["id"] == str(branch.id) for row in listed.data["branches"])
 
@@ -496,6 +501,57 @@ def test_api_key_is_hashed_tenant_scoped_and_revocable(finance_client):
 
 
 @pytest.mark.django_db
+def test_existing_api_keys_and_vendor_links_follow_workspace_lifecycle_and_branch_scope(finance_client):
+    import hashlib
+    tenant, user, client = finance_client
+    Membership.objects.filter(tenant=tenant, user=user).update(role="OWNER")
+    key_response = client.post("/api/v1/api-keys", {"name": "Lifecycle report", "scopes": ["invoices:read"]},
+        format="json", HTTP_X_WORKSPACE=tenant.workspace_key)
+    assert key_response.status_code == 201
+    key = TenantAPIKey.objects.get(id=key_response.data["id"])
+    invoice = Invoice.objects.create(tenant=tenant, invoice_number="LIFECYCLE-1", invoice_total="15")
+    plan = Plan.objects.create(name="Lifecycle plan", slug="lifecycle-plan")
+    api_feature, _ = Feature.objects.get_or_create(key="api_access", defaults={"name": "Public API"})
+    PlanFeature.objects.create(plan=plan, feature=api_feature, enabled=True)
+    subscription = Subscription.objects.create(tenant=tenant, plan=plan, status=Subscription.Status.ACTIVE)
+    vendor = Vendor.objects.create(tenant=tenant, name="Lifecycle supplier")
+    token = "lifecycle-vendor-token"
+    VendorPortalInvite.objects.create(tenant=tenant, vendor=vendor,
+        token_hash=hashlib.sha256(token.encode()).hexdigest(), expires_at=timezone.now()+timedelta(days=1))
+    external = APIClient()
+    headers = {"HTTP_AUTHORIZATION": f"Bearer {key_response.data['token']}"}
+    assert external.get("/api/v1/external/invoices", **headers).status_code == 200
+    public = APIClient()
+    path = f"/api/v1/vendor-portal/access/{token}"
+    assert public.get(path).status_code == 200
+
+    subscription.status = Subscription.Status.SUSPENDED
+    subscription.save(update_fields=["status"])
+    assert external.get("/api/v1/external/invoices", **headers).status_code == 403
+    assert public.get(path).status_code == 404
+    assert public.post(path, {"action": "message", "invoice_id": str(invoice.id), "body": "Suspended update"}, format="json").status_code == 404
+    tenant.invoice_intake_token = "intake-lifecycle-token"
+    tenant.save(update_fields=["invoice_intake_token"])
+    intake = public.post(f"/api/v1/email-ingestion/{tenant.workspace_key}", {"message_id": "paused-message"},
+        format="json", HTTP_X_INVOICE_INTAKE_TOKEN=tenant.invoice_intake_token)
+    assert intake.status_code == 403
+    membership = Membership.objects.get(tenant=tenant, user=user)
+    membership.branch_scope_enabled = True
+    membership.save(update_fields=["branch_scope_enabled"])
+    subscription.status = Subscription.Status.ACTIVE
+    subscription.save(update_fields=["status"])
+    assert external.get("/api/v1/external/invoices", **headers).status_code == 403
+
+    membership.branch_scope_enabled = False
+    membership.save(update_fields=["branch_scope_enabled"])
+    tenant.is_deleted = True
+    tenant.save(update_fields=["is_deleted"])
+    assert external.get("/api/v1/external/invoices", **headers).status_code == 403
+    assert public.get(path).status_code == 404
+    assert client.get("/api/v1/auth/me", HTTP_X_WORKSPACE=tenant.workspace_key).status_code == 403
+
+
+@pytest.mark.django_db
 def test_webhook_secret_is_encrypted_and_invoice_event_is_queued(monkeypatch, finance_client):
     from cryptography.fernet import Fernet
     from phase3 import services
@@ -547,18 +603,93 @@ def test_webhook_delivery_signs_payload_and_records_receiver_status(monkeypatch,
         def read(self, _limit): return b""
     class FakeConnection:
         def __init__(self, host, address): captured["host"] = host; captured["address"] = address
-        def request(self, method, path, body, headers): captured.update(method=method, path=path, body=body, headers=headers)
+        def request(self, method, path, body, headers):
+            captured.update(method=method, path=path, body=body, headers=headers)
+            assert services.deliver_one(delivery) == WebhookDelivery.Status.DELIVERING
+            assert "request_count" not in captured
+            captured["request_count"] = 1
         def getresponse(self): return FakeResponse()
         def close(self): pass
     monkeypatch.setattr(services, "validate_public_webhook_url", lambda url: (__import__("urllib.parse", fromlist=["urlsplit"]).urlsplit(url), "8.8.8.8"))
     monkeypatch.setattr(services, "PinnedHTTPSConnection", FakeConnection)
     assert services.deliver_one(delivery) == WebhookDelivery.Status.DELIVERED
+    assert captured["request_count"] == 1
     delivery.refresh_from_db()
     import hmac
     import hashlib
     expected = "sha256=" + hmac.new(b"shared-secret", captured["body"], hashlib.sha256).hexdigest()
     assert captured["headers"]["X-KriyoPay-Signature-256"] == expected
     assert delivery.attempts == 1 and delivery.response_code == 204 and delivery.delivered_at is not None
+
+
+@pytest.mark.django_db
+def test_deliver_webhooks_command_dry_run_counts_without_sending(finance_client, monkeypatch):
+    from io import StringIO
+    from django.core.management import call_command
+    from phase3.management.commands import deliver_webhooks
+
+    tenant, user, _client = finance_client
+    endpoint = WebhookEndpoint.objects.create(tenant=tenant, name="Dry run", url="https://hooks.example.com/x",
+        encrypted_secret="encrypted-placeholder", events=["invoice.created"], created_by=user)
+    delivery = WebhookDelivery.objects.create(tenant=tenant, endpoint=endpoint, event_type="invoice.created", payload={"id": "evt-dry-run"})
+    monkeypatch.setattr(deliver_webhooks, "deliver_due_webhooks", lambda **kwargs: (_ for _ in ()).throw(AssertionError("dry run attempted delivery")))
+    output = StringIO()
+    call_command("deliver_webhooks", "--dry-run", "--limit", "10", stdout=output)
+    delivery.refresh_from_db()
+    assert "1 webhook delivery attempt" in output.getvalue()
+    assert delivery.status == WebhookDelivery.Status.QUEUED and delivery.attempts == 0
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.skipif(connection.vendor != "postgresql", reason="Requires PostgreSQL row locks")
+def test_concurrent_webhook_workers_claim_delivery_once(monkeypatch, finance_client):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event, Lock
+    from cryptography.fernet import Fernet
+    from django.conf import settings
+    from django.db import close_old_connections, connections
+    from phase3 import services
+
+    tenant, user, _client = finance_client
+    monkeypatch.setattr(settings, "WEBHOOK_FERNET_KEY", Fernet.generate_key().decode())
+    endpoint = WebhookEndpoint.objects.create(tenant=tenant, name="Concurrent receiver", url="https://hooks.example.com/x",
+        encrypted_secret=services.encrypt_signing_secret("shared-secret"), events=["invoice.created"], created_by=user)
+    delivery = WebhookDelivery.objects.create(tenant=tenant, endpoint=endpoint, event_type="invoice.created", payload={"id": "evt-concurrent"})
+    started, release = Event(), Event()
+    request_count = [0]
+    request_lock = Lock()
+
+    class FakeResponse:
+        status = 204
+        def read(self, _limit): return b""
+
+    class FakeConnection:
+        def __init__(self, host, address): pass
+        def request(self, method, path, body, headers):
+            with request_lock:
+                request_count[0] += 1
+            started.set()
+            assert release.wait(timeout=10)
+        def getresponse(self): return FakeResponse()
+        def close(self): pass
+
+    monkeypatch.setattr(services, "validate_public_webhook_url", lambda url: (__import__("urllib.parse", fromlist=["urlsplit"]).urlsplit(url), "8.8.8.8"))
+    monkeypatch.setattr(services, "PinnedHTTPSConnection", FakeConnection)
+    def send():
+        close_old_connections()
+        try:
+            return services.deliver_one(delivery)
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        first = workers.submit(send)
+        assert started.wait(timeout=10)
+        second = workers.submit(send)
+        assert second.result(timeout=10) == WebhookDelivery.Status.DELIVERING
+        release.set()
+        assert first.result(timeout=10) == WebhookDelivery.Status.DELIVERED
+    assert request_count[0] == 1
 
 
 @pytest.mark.django_db
@@ -722,15 +853,56 @@ def test_gmail_sync_imports_supported_attachment_once_without_mailbox_mutations(
     monkeypatch.setattr("phase3.views.gmail_api", gmail_api)
     first = client.post("/api/v1/google/gmail/sync", {}, format="json", HTTP_X_WORKSPACE=tenant.workspace_key)
     assert first.status_code == 200, first.data
-    assert first.data["attachments_imported"] == 1
+    assert first.data["attachments_imported"] == 1, {"response": first.data, "provider_calls": requested_paths}
     assert first.data["messages_checked"] == 1
     log = EmailIngestionLog.objects.get(tenant=tenant, provider="GMAIL", message_id="gmail-message-42")
     assert log.status == EmailIngestionLog.Status.PROCESSED
+    assert log.claimed_at is None and log.processing_token is None
     assert Document.objects.filter(tenant=tenant).count() == 1
     assert not any(path.endswith("/modify") or path.endswith("/trash") for path, _ in requested_paths)
     second = client.post("/api/v1/google/gmail/sync", {}, format="json", HTTP_X_WORKSPACE=tenant.workspace_key)
     assert second.status_code == 200 and second.data["messages_skipped"] == 1
     assert Document.objects.filter(tenant=tenant).count() == 1
+
+
+@pytest.mark.django_db
+def test_gmail_sync_skips_a_message_with_a_live_processing_lease(monkeypatch, finance_client):
+    import uuid
+    from django.conf import settings
+    from cryptography.fernet import Fernet
+    from phase3.services import encrypt_signing_secret
+    from inbound_email.models import EmailIngestionLog
+
+    tenant, user, client = finance_client
+    monkeypatch.setattr(settings, "WEBHOOK_FERNET_KEY", Fernet.generate_key().decode())
+    GmailConnection.objects.create(tenant=tenant, google_subject="g-live", email="ap-live@example.test",
+        encrypted_refresh_token=encrypt_signing_secret("refresh"), scopes=["https://www.googleapis.com/auth/gmail.readonly"], connected_by=user)
+    lease = uuid.uuid4()
+    log = EmailIngestionLog.objects.create(tenant=tenant, provider="GMAIL", message_id="gmail-live-lease",
+        status=EmailIngestionLog.Status.PROCESSING, claimed_at=timezone.now(), processing_token=lease)
+    monkeypatch.setattr("phase3.views.refresh_gmail_access_token", lambda token: "access")
+    details_requested = []
+    def gmail_api(_token, path, params=None):
+        if path == "messages": return {"messages": [{"id": "gmail-live-lease"}]}
+        details_requested.append(path)
+        return {"id": "gmail-live-lease", "payload": {"headers": [], "parts": []}}
+    monkeypatch.setattr("phase3.views.gmail_api", gmail_api)
+
+    response = client.post("/api/v1/google/gmail/sync", {}, format="json", HTTP_X_WORKSPACE=tenant.workspace_key)
+    assert response.status_code == 200, response.data
+    assert response.data["messages_skipped"] == 1
+    assert response.data["results"][0]["status"] == "ALREADY_PROCESSING"
+    assert details_requested == []
+    log.refresh_from_db()
+    assert log.processing_token == lease and log.status == EmailIngestionLog.Status.PROCESSING
+
+    log.claimed_at = timezone.now() - timedelta(minutes=20)
+    log.save(update_fields=["claimed_at"])
+    recovered = client.post("/api/v1/google/gmail/sync", {}, format="json", HTTP_X_WORKSPACE=tenant.workspace_key)
+    assert recovered.status_code == 200, recovered.data
+    assert details_requested == ["messages/gmail-live-lease"]
+    log.refresh_from_db()
+    assert log.status == EmailIngestionLog.Status.PARTIAL and log.processing_token is None and log.claimed_at is None
 
 
 @pytest.mark.django_db

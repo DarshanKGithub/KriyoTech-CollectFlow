@@ -79,6 +79,10 @@ class EmailIngestionWebhook(APIView):
         supplied = request.headers.get("X-Invoice-Intake-Token", "")
         if not tenant or not tenant.invoice_intake_token or not secrets.compare_digest(supplied, tenant.invoice_intake_token):
             return err("AUTHENTICATION_REQUIRED", "Invalid intake token", 401)
+        from accounts.workspace_access import workspace_access_denial
+        denial = workspace_access_denial(tenant, method="POST")
+        if denial:
+            return err("WORKSPACE_UNAVAILABLE", denial, 403)
         from admin_console.services import has_feature
         if tenant.admin_subscriptions.exists() and not has_feature(tenant, "email_invoice_intake"):
             return err("FEATURE_NOT_AVAILABLE", "Email invoice intake is not enabled for this plan", 403)

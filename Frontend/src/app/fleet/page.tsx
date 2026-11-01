@@ -5,24 +5,36 @@ import { applyFieldErrors } from "@/components/form-validation";
 import { EmptyState } from "@/components/empty-state";
 import { PageSkeleton } from "@/components/content-skeleton";
 import { TripProgress } from "@/components/workflow-progress";
-import { UiAlert, UiArticle, UiBox, UiButton, UiForm, UiH1, UiH2, UiH3, UiInput, UiLabel, UiMain, UiSection, UiSelect, UiSpan, UiStrong, UiTable, UiTableBody, UiTableHead, UiTableRow, UiTd, UiText, UiTh } from "@/components/product-ui";
+import { AppLink as Link, UiAlert, UiArticle, UiBox, UiButton, UiForm, UiH1, UiH2, UiH3, UiInput, UiLabel, UiMain, UiSection, UiSelect, UiSpan, UiStrong, UiTable, UiTableBody, UiTableHead, UiTableRow, UiTd, UiText, UiTh } from "@/components/product-ui";
 import { requestInput } from "@/components/product-dialogs";
 import { useListPagination } from "@/components/list-pagination";
 import { LiveData } from "@/components/live-data";
+import { FleetLiveMap, type FleetMapVehicle } from "./live-tracking/fleet-live-map";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { canShowNavigation, type NavigationAccess } from "@/lib/navigation-access";
+import { ArrowUpRight, CircleAlert, ClipboardList, Fuel, MapPin, Plus, RefreshCw, Route, Search, Truck, UsersRound, Wrench } from "lucide-react";
 type Vehicle = {
     id: string;
     registration_number: string;
     status: string;
+    make_model?: string;
+    vehicle_type?: string;
+    capacity?: string | null;
+    capacity_unit?: string;
+    expected_km_per_litre?: string | null;
+    ownership_type?: string;
 };
 type Driver = {
     id: string;
     name: string;
     status: string;
     account_email?: string | null;
+    contact_phone?: string;
+    reference_code?: string;
 };
+type TrackingTrip = FleetMapVehicle & { trip_number: string; driver: string; origin: string; destination: string; age_seconds: number | null };
 type TransportOrder = {
     id: string;
     order_number: string;
@@ -180,6 +192,15 @@ export default function FleetPage() {
     const focusSection = featureSections[pathname.split("/")[2]] || "overview";
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
     const [drivers, setDrivers] = useState<Driver[]>([]);
+    const [assetView, setAssetView] = useState<"vehicles" | "drivers">("vehicles");
+    const [assetSearch, setAssetSearch] = useState("");
+    const [vehicleFormOpen, setVehicleFormOpen] = useState(false);
+    const [driverFormOpen, setDriverFormOpen] = useState(false);
+    const [trackingTrips, setTrackingTrips] = useState<TrackingTrip[]>([]);
+    const [trackingMessage, setTrackingMessage] = useState("");
+    const [selectedTrackingTrip, setSelectedTrackingTrip] = useState<string | null>(null);
+    const [trackingAccess, setTrackingAccess] = useState(false);
+    const [navigationAccess, setNavigationAccess] = useState<NavigationAccess | null>(null);
     const [orders, setOrders] = useState<TransportOrder[]>([]);
     const [members, setMembers] = useState<Member[]>([]);
     const [alerts, setAlerts] = useState<FleetAlert[]>([]);
@@ -207,7 +228,8 @@ export default function FleetPage() {
         const needSalaries = focusSection === "driver-salaries";
         const needAlerts = overview;
         const needOrders = focusSection === "trip-create";
-        const [v, d, t, membersResponse, summary, followUpsResponse, salariesResponse, alertsResponse, ordersResponse] = await Promise.all([
+        const needAccess = overview;
+        const [v, d, t, membersResponse, summary, followUpsResponse, salariesResponse, alertsResponse, ordersResponse, accessResponse] = await Promise.all([
             needVehicles ? apiFetch("/fleet/vehicles") : Promise.resolve(null),
             needDrivers ? apiFetch("/fleet/drivers") : Promise.resolve(null),
             needTrips ? apiFetch(`/fleet/trips${params.size ? `?${params}` : ""}`) : Promise.resolve(null),
@@ -217,6 +239,7 @@ export default function FleetPage() {
             needSalaries ? apiFetch("/fleet/driver-salaries") : Promise.resolve(null),
             needAlerts ? apiFetch("/fleet/alerts") : Promise.resolve(null),
             needOrders ? apiFetch("/fleet/orders?status=OPEN") : Promise.resolve(null),
+            needAccess ? apiFetch("/auth/me") : Promise.resolve(null),
         ]);
         if (v?.ok)
             setVehicles(await v.json());
@@ -242,6 +265,33 @@ export default function FleetPage() {
         }
         if (ordersResponse?.ok)
             setOrders(await ordersResponse.json());
+        if (accessResponse?.ok) {
+            const access = await accessResponse.json() as NavigationAccess;
+            setNavigationAccess(access);
+            if (canShowNavigation("/fleet/live-tracking", access)) {
+                setTrackingAccess(true);
+                const trackingResponse = await apiFetch("/fleet/live-locations");
+                if (trackingResponse.ok) {
+                    const tracking = await trackingResponse.json();
+                    const liveTrips: TrackingTrip[] = tracking.trips || [];
+                    setTrackingTrips(liveTrips);
+                    setSelectedTrackingTrip(current => liveTrips.some(trip => trip.trip_id === current) ? current : liveTrips[0]?.trip_id || null);
+                    setTrackingMessage("");
+                } else {
+                    setTrackingTrips([]);
+                    setTrackingMessage("Live location data is temporarily unavailable.");
+                }
+            } else {
+                setTrackingAccess(false);
+                setTrackingTrips([]);
+                setTrackingMessage("Live tracking access is restricted for your role.");
+            }
+        } else if (needAccess) {
+            setNavigationAccess(null);
+            setTrackingAccess(false);
+            setTrackingTrips([]);
+            setTrackingMessage("Could not verify live tracking access.");
+        }
         if ([v, d, t, summary, followUpsResponse, salariesResponse, alertsResponse, ordersResponse].some(response => response !== null && !response.ok))
             throw new Error("Some fleet data could not refresh.");
     }, [filters, focusSection]);
@@ -267,6 +317,8 @@ export default function FleetPage() {
             await send(path, "POST", data);
             formElement.reset();
             await refresh();
+            if (path === "/fleet/vehicles") setVehicleFormOpen(false);
+            if (path === "/fleet/drivers") setDriverFormOpen(false);
             setMessage("Saved successfully.");
         }
         catch (error) {
@@ -421,13 +473,23 @@ export default function FleetPage() {
         return <UiBox className="overflow-hidden rounded-lg border border-line"><UiH3 className="border-b border-line bg-slate-50 px-3 py-2 text-sm font-semibold">{title}</UiH3>{groups.length === 0 ? <EmptyState description="No approved trip data for this selection." onAction={()=>void refresh()} actionLabel="Refresh data" /> : <UiBox className="overflow-x-auto"><UiTable className="w-full min-w-[520px] text-left text-xs"><UiTableHead className="text-slate-500"><UiTableRow><UiTh className="px-3 py-2">{title === "By month" ? "Month" : "Name"}</UiTh><UiTh className="px-3 py-2">Trips</UiTh><UiTh className="px-3 py-2">Income</UiTh><UiTh className="px-3 py-2">Costs</UiTh><UiTh className="px-3 py-2">Margin</UiTh></UiTableRow></UiTableHead><UiTableBody>{groups.map(group => <UiTableRow className="border-t border-line" key={group.id}><UiTd className="px-3 py-2 font-medium">{group.name}</UiTd><UiTd className="px-3 py-2">{group.trips}</UiTd><UiTd className="px-3 py-2">₹{group.income}</UiTd><UiTd className="px-3 py-2">₹{group.costs}</UiTd><UiTd className="px-3 py-2">₹{group.margin}</UiTd></UiTableRow>)}</UiTableBody></UiTable></UiBox>}</UiBox>;
     }
     const activeFollowUps = followUps.filter(item => openStatuses.includes(item.status));
-    const metricCards: [
-        string,
-        string | number
-    ][] = [
-        ["Active trucks", dashboard?.active_vehicles ?? 0], ["Active drivers", dashboard?.active_drivers ?? 0],
-        ["Trips underway", dashboard?.trips_in_progress ?? 0], ["Waiting for review", dashboard?.trips_awaiting_review ?? 0],
-        ["Open follow-ups", dashboard?.open_follow_ups ?? 0], ["Salary still to pay", `₹${dashboard?.driver_salary_remaining ?? "0.00"}`], ["Approved trip margin", `₹${dashboard?.approved_trip_margin ?? "0.00"}`],
+    const pageMeta: Record<string, { eyebrow: string; title: string; description: string }> = {
+        overview: { eyebrow: "Operations", title: "Fleet control center", description: "A live view of vehicles, trips, and the work that needs attention." },
+        "fleet-setup": { eyebrow: "Fleet directory", title: "Trucks & drivers", description: "Manage the vehicles and people available to your operation." },
+        "trip-create": { eyebrow: "Dispatch", title: "Plan a trip", description: "Assign an available truck and driver to a customer movement." },
+        trips: { eyebrow: "Operations", title: "Trip register", description: "Review trip progress, submitted amounts, and approved margins." },
+        alerts: { eyebrow: "Operations", title: "Trip alerts", description: "Review budget overruns, low margins, and fuel efficiency exceptions." },
+        "follow-ups": { eyebrow: "Operations", title: "Open follow-ups", description: "Resolve missing evidence and costs that need an operator decision." },
+        "trip-reports": { eyebrow: "Insights", title: "Trip profitability", description: "Compare approved trip revenue, costs, and margin over time." },
+        "driver-salaries": { eyebrow: "Finance", title: "Driver settlements", description: "Review driver earnings, approved payments, and outstanding balances." },
+    };
+    const currentPage = pageMeta[focusSection] || pageMeta.overview;
+    const overviewCards = [
+        { label: "Active trucks", value: dashboard ? dashboard.active_vehicles : "—", detail: "Fleet available for assignment", icon: Truck, tone: "text-slate-900", accent: "bg-slate-100 text-slate-700" },
+        { label: "Active drivers", value: dashboard ? dashboard.active_drivers : "—", detail: "Drivers in the directory", icon: UsersRound, tone: "text-slate-900", accent: "bg-slate-100 text-slate-700" },
+        { label: "Trips underway", value: dashboard ? dashboard.trips_in_progress : "—", detail: "Currently in progress", icon: Route, tone: "text-slate-900", accent: "bg-emerald-50 text-emerald-700" },
+        { label: "Awaiting review", value: dashboard ? dashboard.trips_awaiting_review : "—", detail: "Completed trips to review", icon: ClipboardList, tone: dashboard?.trips_awaiting_review ? "text-amber-700" : "text-slate-900", accent: "bg-amber-50 text-amber-700" },
+        { label: "Approved trip margin", value: dashboard ? `₹${dashboard.approved_trip_margin}` : "—", detail: "Approved actual amounts only", icon: ArrowUpRight, tone: "text-emerald-700", accent: "bg-emerald-50 text-emerald-700" },
     ];
     const tripPage = useListPagination(trips, JSON.stringify(filters) + String(focusSection));
     const etaEvaluations = trips.filter(trip => trip.eta_error_minutes !== null && trip.eta_error_minutes !== undefined);
@@ -435,27 +497,97 @@ export default function FleetPage() {
     const followUpPage = useListPagination(activeFollowUps);
     const salaryPage = useListPagination(salaryRecords);
     if (initialLoading) return <PageSkeleton variant="cards" label="Loading fleet operations" />;
-    return <UiMain className="w-full min-w-0 px-4 py-8 sm:px-6 lg:px-8">
-    <UiBox className="mb-7 flex flex-wrap items-end justify-between gap-3"><UiBox><UiText className="text-xs font-semibold uppercase tracking-widest text-forest">Transport operations</UiText><UiH1 className="mt-1 text-3xl font-bold tracking-tight text-ink">Fleet & trips</UiH1><UiText className="mt-2 max-w-2xl text-sm text-slate-500">Set up trucks and drivers, record each trip’s income and costs, then review the approved trip margin.</UiText></UiBox><UiButton className="rounded-lg border border-line px-3 py-2 text-sm font-medium hover:bg-slate-50" onClick={() => void refresh()}>Refresh</UiButton></UiBox>
-    <LiveData onRefresh={refresh} paused={busy} interval={focusSection === "overview" || focusSection === "alerts" ? 60000 : 30000}/>
-    {alertsError && <UiBox role="alert" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{alertsError}<UiButton type="button" onClick={() => void refresh().catch(() => setAlertsError("Fleet alerts could not be loaded. Check the connection and retry."))} className="ml-3 font-semibold underline">Retry alerts</UiButton></UiBox>}
-    {message && <UiBox role="status" className="mb-5 rounded-lg border border-line bg-white px-4 py-3 text-sm text-slate-700">{message}</UiBox>}
+    return <UiMain className="w-full min-w-0 px-4 py-7 sm:px-6 lg:px-8">
+      <UiBox className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <UiBox>
+          <UiText className="text-[10px] font-bold uppercase tracking-[.18em] text-slate-500">{currentPage.eyebrow}</UiText>
+          <UiH1 className="mt-1 text-3xl font-semibold tracking-tight text-ink">{currentPage.title}</UiH1>
+          <UiText className="mt-1 max-w-2xl text-sm text-slate-500">{currentPage.description}</UiText>
+        </UiBox>
+        <UiBox className="flex items-center gap-2">
+          {focusSection === "overview" && canShowNavigation("/fleet/dispatch", navigationAccess) && <Link href="/fleet/dispatch" className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-3.5 py-2.5 text-xs font-semibold text-white hover:bg-slate-800"><Route size={15}/>Open dispatch</Link>}
+          <UiButton type="button" onClick={() => void refresh()} disabled={busy} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><RefreshCw size={14}/>{busy ? "Refreshing" : "Refresh data"}</UiButton>
+        </UiBox>
+      </UiBox>
+      {(focusSection === "overview" || focusSection === "alerts") && <LiveData onRefresh={refresh} paused={busy} interval={60000} compact/>}
+      {alertsError && (focusSection === "overview" || focusSection === "alerts") && <UiBox role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><span>{alertsError}</span><UiButton type="button" onClick={() => void refresh().catch(() => setAlertsError("Fleet alerts could not be loaded. Check the connection and retry."))} className="font-semibold underline">Retry</UiButton></UiBox>}
+      {message && <UiBox role="status" className="mb-5 rounded-lg border border-line bg-white px-4 py-3 text-sm text-slate-700">{message}</UiBox>}
 
-    {(!focusSection || focusSection === 'overview' || focusSection === 'alerts') && <>
-    <UiSection className="mb-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      {metricCards.map(([label, value]) => <UiBox className={cardClass} key={label}><UiText className="text-xs text-slate-500">{label}</UiText><UiText className="mt-2 text-xl font-bold text-ink">{value}</UiText>{label === "Approved trip margin" && <UiText className="mt-1 text-[11px] text-slate-500">Approved amounts only</UiText>}</UiBox>)}
-    </UiSection>
-    <UiSection className={`${cardClass} mb-7`}><UiBox className="flex items-start justify-between gap-3"><UiBox><UiH2 className="font-semibold">Trip profitability & fuel alerts</UiH2><UiText className="mt-1 text-xs text-slate-500">Budget overruns, low margins, and fuel efficiency below a truck’s benchmark.</UiText></UiBox><UiSpan className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">{alerts.length} alerts</UiSpan></UiBox>{alerts.length ? <UiBox className="mt-3 divide-y divide-line">{alerts.map(alert => <UiBox key={alert.id} className="flex flex-wrap justify-between gap-2 py-3 text-sm"><UiSpan><UiStrong>{alert.trip_number}</UiStrong> · {alert.message}</UiSpan><UiSpan className="text-xs text-slate-500">{alert.kind.replaceAll("_", " ")}</UiSpan></UiBox>)}</UiBox> : <EmptyState description="No trip alerts. Add budgets, fuel litres, and truck efficiency benchmarks for more checks." onAction={()=>void refresh()} actionLabel="Refresh data" />}</UiSection>
-    </>}
+      {(focusSection === "overview" || focusSection === "alerts") && <>
+        <UiSection aria-label="Fleet performance snapshot" className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {overviewCards.map(metric => { const Icon = metric.icon; return <UiArticle key={metric.label} className="rounded-xl border border-slate-200 bg-white p-4">
+            <UiBox className="flex items-start justify-between gap-2"><UiText className="text-xs font-medium text-slate-500">{metric.label}</UiText><span className={`grid size-8 shrink-0 place-items-center rounded-lg ${metric.accent}`}><Icon size={16}/></span></UiBox>
+            <UiText className={`mt-2 text-2xl font-semibold tracking-tight tabular-nums ${metric.tone}`}>{metric.value}</UiText>
+            <UiText className="mt-1 text-[11px] text-slate-500">{metric.detail}</UiText>
+          </UiArticle>; })}
+        </UiSection>
 
-    {(!focusSection || focusSection === 'fleet-setup') && <>
-    <UiBox className="mb-3"><UiH2 className="text-lg font-semibold">1. Set up your fleet</UiH2><UiText className="mt-1 text-sm text-slate-500">Add each truck and driver once. You can select them when creating trips.</UiText></UiBox>
-    <UiSection id="fleet-setup" className="mb-7 grid gap-5 lg:grid-cols-2">
-      <UiForm className={cardClass} onSubmit={e => void submitForm(e, "/fleet/vehicles")}><UiH3 className="mb-4 font-semibold">Add a truck</UiH3><UiBox className="grid gap-3 sm:grid-cols-2"><UiLabel className="text-xs text-slate-500">Truck registration number<UiInput className={inputClass} name="registration_number" required placeholder="KA 01 AB 1234"/></UiLabel><UiLabel className="text-xs text-slate-500">Make and model <UiSpan className="text-slate-400">(optional)</UiSpan><UiInput className={inputClass} name="make_model" placeholder="e.g. Tata 407"/></UiLabel><UiLabel className="text-xs text-slate-500">Ownership <UiSpan className="text-slate-400">(optional)</UiSpan><UiInput className={inputClass} name="ownership_type" placeholder="Owned or leased"/></UiLabel><UiLabel className="text-xs text-slate-500">Vehicle type<UiSelect name="vehicle_type" className={inputClass} defaultValue=""><option value="">Not configured</option>{["LCV","RIGID","TRAILER","TANKER","REFRIGERATED"].map(t=><option key={t} value={t}>{t}</option>)}</UiSelect></UiLabel><UiLabel className="text-xs text-slate-500">Capacity unit<UiSelect name="capacity_unit" className={inputClass} defaultValue=""><option value="">Not configured</option>{["TONNE","KG","CBM","PALLET"].map(t=><option key={t} value={t}>{t}</option>)}</UiSelect></UiLabel><UiLabel className="text-xs text-slate-500">Load capacity <UiSpan className="text-slate-400">(optional)</UiSpan><UiInput className={inputClass} name="capacity" type="number" step="0.001" min="0" placeholder="Use your usual unit"/></UiLabel><UiLabel className="text-xs text-slate-500">Expected fuel efficiency (km/L)<UiInput className={inputClass} name="expected_km_per_litre" type="number" step="0.1" min="0.1" placeholder="Optional truck benchmark"/></UiLabel></UiBox><UiButton disabled={busy} className="mt-4 rounded-lg bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Save truck</UiButton></UiForm>
-      <UiForm className={cardClass} onSubmit={e => void submitForm(e, "/fleet/drivers")}><UiH3 className="mb-4 font-semibold">Add a driver</UiH3><UiBox className="grid gap-3 sm:grid-cols-2"><UiLabel className="text-xs text-slate-500">Driver’s full name<UiInput className={inputClass} name="name" required placeholder="Name"/></UiLabel><UiLabel className="text-xs text-slate-500">Phone number <UiSpan className="text-slate-400">(optional)</UiSpan><UiInput className={inputClass} name="contact_phone" type="tel" placeholder="Contact number"/></UiLabel><UiLabel className="text-xs text-slate-500">Staff ID or reference <UiSpan className="text-slate-400">(optional)</UiSpan><UiInput className={inputClass} name="reference_code" placeholder="Employee ID"/></UiLabel><UiLabel className="text-xs text-slate-500">Driver sign-in account <UiSpan className="text-slate-400">(create/invite a DRIVER user first)</UiSpan><UiSelect className={inputClass} name="user_id" defaultValue=""><option value="">No account linked</option>{members.filter(member => member.role === "DRIVER" && member.is_active && !drivers.some(driver => driver.account_email === member.email)).map(member => <option key={member.id} value={member.id}>{member.name || member.email} · {member.email}</option>)}</UiSelect></UiLabel></UiBox><UiButton disabled={busy} className="mt-4 rounded-lg bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Save driver</UiButton></UiForm>
-    </UiSection>
-    </>}
+        <div className="mb-5 grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(320px,.85fr)]">
+          <UiSection className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <UiBox className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3"><UiBox><UiH2 className="text-sm font-semibold text-slate-900">Live operations</UiH2><UiText className="mt-0.5 text-[11px] text-slate-500">Latest vehicle positions reported by active trips</UiText></UiBox>{trackingAccess && <Link href="/fleet/live-tracking" className="inline-flex items-center gap-1 text-xs font-semibold text-slate-700 hover:text-slate-950">Open tracking <ArrowUpRight size={14}/></Link>}</UiBox>
+            {trackingAccess ? <FleetLiveMap compact vehicles={trackingTrips} selectedTripId={selectedTrackingTrip} onSelect={setSelectedTrackingTrip}/> : <UiBox className="grid min-h-64 place-items-center bg-slate-50 px-6 py-10 text-center"><UiBox className="max-w-sm"><MapPin className="mx-auto text-slate-400" size={22}/><UiText className="mt-3 text-sm font-semibold text-slate-800">Live map access is unavailable</UiText><UiText className="mt-1 text-xs leading-5 text-slate-500">{trackingMessage || "This workspace role does not have permission to view live vehicle locations."}</UiText></UiBox></UiBox>}
+            {trackingAccess && trackingTrips.length > 0 && <UiBox className="grid gap-0 border-t border-slate-200 sm:grid-cols-2">
+              {trackingTrips.slice(0, 4).map((trip, index) => <button key={trip.trip_id} type="button" onClick={() => setSelectedTrackingTrip(trip.trip_id)} aria-pressed={trip.trip_id === selectedTrackingTrip} className={`flex min-w-0 items-center justify-between gap-3 px-4 py-3 text-left hover:bg-slate-50 ${index % 2 === 0 ? "sm:border-r sm:border-slate-200" : ""} ${index > 1 ? "border-t border-slate-200" : ""}`}>
+                <span className="min-w-0"><span className="block truncate text-xs font-semibold text-slate-900">{trip.vehicle}<span className="ml-2 font-normal text-slate-500">{trip.trip_number}</span></span><span className="mt-0.5 block truncate text-[10px] text-slate-500">{trip.origin || "Origin"} → {trip.destination || "Destination"} · {trip.driver}</span></span>
+                <span className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-semibold ${trip.status === "LIVE" ? "bg-emerald-50 text-emerald-700" : trip.status === "STALE" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"}`}>{trip.status === "LIVE" ? "Live" : trip.status === "STALE" ? "Stale" : "Waiting"}</span>
+              </button>)}
+            </UiBox>}
+          </UiSection>
 
+          <div className="grid content-start gap-4">
+            <UiSection className="rounded-xl border border-slate-200 bg-white p-4">
+              <UiBox className="flex items-start justify-between gap-3"><UiBox><UiH2 className="text-sm font-semibold text-slate-900">Work queue</UiH2><UiText className="mt-0.5 text-[11px] text-slate-500">Items waiting for an operator</UiText></UiBox><ClipboardList size={17} className="text-slate-400"/></UiBox>
+              <UiBox className="mt-3 divide-y divide-slate-100">
+                {canShowNavigation("/fleet/trips", navigationAccess) && <Link href="/fleet/trips" className="flex items-center justify-between gap-3 py-3 text-xs hover:text-slate-950"><span><span className="block font-medium text-slate-800">Trips awaiting review</span><span className="mt-0.5 block text-[10px] text-slate-500">Review actual income and cost lines</span></span><UiSpan className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-semibold text-amber-800">{dashboard ? dashboard.trips_awaiting_review : "—"}</UiSpan></Link>}
+                {canShowNavigation("/fleet/follow-ups", navigationAccess) && <Link href="/fleet/follow-ups" className="flex items-center justify-between gap-3 py-3 text-xs hover:text-slate-950"><span><span className="block font-medium text-slate-800">Open follow-ups</span><span className="mt-0.5 block text-[10px] text-slate-500">Missing evidence and cost exceptions</span></span><UiSpan className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-700">{dashboard ? dashboard.open_follow_ups : "—"}</UiSpan></Link>}
+                {canShowNavigation("/fleet/driver-salaries", navigationAccess) && <Link href="/fleet/driver-salaries" className="flex items-center justify-between gap-3 py-3 text-xs hover:text-slate-950"><span><span className="block font-medium text-slate-800">Driver settlements remaining</span><span className="mt-0.5 block text-[10px] text-slate-500">Approved balance not yet settled</span></span><UiStrong className="shrink-0 text-xs tabular-nums">{dashboard ? `₹${dashboard.driver_salary_remaining}` : "—"}</UiStrong></Link>}
+              </UiBox>
+            </UiSection>
+            <UiSection className="rounded-xl border border-slate-200 bg-white p-4">
+              <UiBox className="flex items-center justify-between gap-3"><UiBox><UiH2 className="text-sm font-semibold text-slate-900">Trip and fuel alerts</UiH2><UiText className="mt-0.5 text-[11px] text-slate-500">Based on recorded budgets and vehicle benchmarks</UiText></UiBox><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${alerts.length ? "bg-amber-50 text-amber-800" : "bg-emerald-50 text-emerald-700"}`}>{alerts.length} open</span></UiBox>
+              {alerts.length ? <UiBox className="mt-2 divide-y divide-slate-100">{alerts.slice(0, 3).map(alert => <UiBox key={alert.id} className="flex items-start gap-2 py-2.5"><CircleAlert size={14} className="mt-0.5 shrink-0 text-amber-600"/><UiBox className="min-w-0"><UiText className="text-xs font-medium text-slate-800">{alert.trip_number} · {alert.message}</UiText><UiText className="mt-0.5 text-[10px] text-slate-500">{alert.kind.replaceAll("_", " ")}</UiText></UiBox></UiBox>)}</UiBox> : <UiText className="mt-3 text-xs text-slate-500">No recorded exceptions need attention.</UiText>}
+              <Link href="/fleet/alerts" className="mt-3 inline-flex items-center gap-1 text-[11px] font-semibold text-slate-700">Review alerts <ArrowUpRight size={13}/></Link>
+            </UiSection>
+          </div>
+        </div>
+
+        <UiSection aria-label="Fleet quick actions" className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            { label: "Plan and dispatch", detail: "Assign an open order", href: "/fleet/dispatch", icon: Route },
+            { label: "Manage trucks & drivers", detail: "Update fleet availability", href: "/fleet/trucks", icon: Truck },
+            { label: "Maintenance", detail: "Review service and breakdowns", href: "/fleet/maintenance", icon: Wrench },
+            { label: "Fuel and trip costs", detail: "Review recorded spend", href: "/fleet/operational-reports", icon: Fuel },
+          ].filter(action => canShowNavigation(action.href, navigationAccess)).map(action => { const Icon = action.icon; return <Link key={action.label} href={action.href} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3.5 py-3 transition-colors hover:border-slate-300 hover:bg-slate-50"><span className="grid size-9 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-700"><Icon size={16}/></span><span className="min-w-0"><span className="block text-xs font-semibold text-slate-900">{action.label}</span><span className="mt-0.5 block truncate text-[10px] text-slate-500">{action.detail}</span></span><ArrowUpRight size={14} className="ml-auto shrink-0 text-slate-400"/></Link>; })}
+        </UiSection>
+      </>}
+
+      {focusSection === "fleet-setup" && <>
+        <UiSection className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {[{ label: "Vehicles", value: vehicles.length }, { label: "Active vehicles", value: vehicles.filter(vehicle => vehicle.status === "ACTIVE").length }, { label: "Drivers", value: drivers.length }, { label: "Active drivers", value: drivers.filter(driver => driver.status === "ACTIVE").length }].map(item => <UiBox key={item.label} className="rounded-lg border border-slate-200 bg-white px-4 py-3"><UiText className="text-[11px] font-medium text-slate-500">{item.label}</UiText><UiText className="mt-1 text-xl font-semibold tabular-nums text-slate-900">{item.value}</UiText></UiBox>)}
+        </UiSection>
+        <UiSection className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3">
+          <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1" role="group" aria-label="Fleet directory type">
+            <button type="button" aria-pressed={assetView === "vehicles"} onClick={() => { setAssetView("vehicles"); setAssetSearch(""); }} className={`rounded-md px-3 py-2 text-xs font-semibold ${assetView === "vehicles" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>Vehicles <span className="ml-1 tabular-nums text-slate-400">{vehicles.length}</span></button>
+            <button type="button" aria-pressed={assetView === "drivers"} onClick={() => { setAssetView("drivers"); setAssetSearch(""); }} className={`rounded-md px-3 py-2 text-xs font-semibold ${assetView === "drivers" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>Drivers <span className="ml-1 tabular-nums text-slate-400">{drivers.length}</span></button>
+          </div>
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <label className="relative min-w-0 flex-1 sm:w-64 sm:flex-none"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input aria-label={`Search ${assetView}`} value={assetSearch} onChange={event => setAssetSearch(event.target.value)} placeholder={assetView === "vehicles" ? "Search registration or model" : "Search driver or phone"} className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-xs outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"/></label>
+            {assetView === "vehicles" ? <UiButton type="button" onClick={() => { setVehicleFormOpen(value => !value); setDriverFormOpen(false); }} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-950 px-3 text-xs font-semibold text-white hover:bg-slate-800"><Plus size={14}/>{vehicleFormOpen ? "Close" : "Add vehicle"}</UiButton> : <UiButton type="button" onClick={() => { setDriverFormOpen(value => !value); setVehicleFormOpen(false); }} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-950 px-3 text-xs font-semibold text-white hover:bg-slate-800"><Plus size={14}/>{driverFormOpen ? "Close" : "Add driver"}</UiButton>}
+          </div>
+        </UiSection>
+
+        {vehicleFormOpen && <UiSection className="mb-4 rounded-xl border border-slate-200 bg-white p-4 sm:p-5"><UiBox className="mb-4 flex items-start justify-between gap-3"><UiBox><UiH2 className="text-sm font-semibold">Register a vehicle</UiH2><UiText className="mt-1 text-xs text-slate-500">Required fields are marked by the browser. Add technical details when they are known.</UiText></UiBox><button type="button" aria-label="Close vehicle form" onClick={() => setVehicleFormOpen(false)} className="rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100">Close</button></UiBox>
+          <UiForm className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" onSubmit={event => void submitForm(event, "/fleet/vehicles")}><UiLabel className="text-xs text-slate-600">Registration number<UiInput className={inputClass} name="registration_number" required placeholder="KA 01 AB 1234"/></UiLabel><UiLabel className="text-xs text-slate-600">Make and model<UiInput className={inputClass} name="make_model" placeholder="e.g. Tata 407"/></UiLabel><UiLabel className="text-xs text-slate-600">Vehicle type<UiSelect name="vehicle_type" className={inputClass} defaultValue=""><option value="">Not configured</option>{["LCV","RIGID","TRAILER","TANKER","REFRIGERATED"].map(type => <option key={type} value={type}>{type}</option>)}</UiSelect></UiLabel><UiLabel className="text-xs text-slate-600">Ownership<UiInput className={inputClass} name="ownership_type" placeholder="Owned or leased"/></UiLabel><UiLabel className="text-xs text-slate-600">Capacity<UiInput className={inputClass} name="capacity" type="number" step="0.001" min="0" placeholder="Optional"/></UiLabel><UiLabel className="text-xs text-slate-600">Capacity unit<UiSelect name="capacity_unit" className={inputClass} defaultValue=""><option value="">Not configured</option>{["TONNE","KG","CBM","PALLET"].map(unit => <option key={unit} value={unit}>{unit}</option>)}</UiSelect></UiLabel><UiLabel className="text-xs text-slate-600">Expected fuel efficiency (km/L)<UiInput className={inputClass} name="expected_km_per_litre" type="number" step="0.1" min="0.1" placeholder="Optional benchmark"/></UiLabel><UiBox className="flex items-end"><UiButton disabled={busy} className="h-10 rounded-lg bg-slate-950 px-4 text-xs font-semibold text-white">{busy ? "Saving…" : "Save vehicle"}</UiButton></UiBox></UiForm>
+        </UiSection>}
+
+        {driverFormOpen && <UiSection className="mb-4 rounded-xl border border-slate-200 bg-white p-4 sm:p-5"><UiBox className="mb-4 flex items-start justify-between gap-3"><UiBox><UiH2 className="text-sm font-semibold">Add a driver</UiH2><UiText className="mt-1 text-xs text-slate-500">Link an existing driver account if this person needs the phone trip view.</UiText></UiBox><button type="button" aria-label="Close driver form" onClick={() => setDriverFormOpen(false)} className="rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100">Close</button></UiBox>
+          <UiForm className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" onSubmit={event => void submitForm(event, "/fleet/drivers")}><UiLabel className="text-xs text-slate-600">Full name<UiInput className={inputClass} name="name" required placeholder="Driver name"/></UiLabel><UiLabel className="text-xs text-slate-600">Phone number<UiInput className={inputClass} name="contact_phone" type="tel" placeholder="Contact number"/></UiLabel><UiLabel className="text-xs text-slate-600">Staff ID or reference<UiInput className={inputClass} name="reference_code" placeholder="Employee ID"/></UiLabel><UiLabel className="text-xs text-slate-600">Driver sign-in account<UiSelect className={inputClass} name="user_id" defaultValue=""><option value="">No account linked</option>{members.filter(member => member.role === "DRIVER" && member.is_active && !drivers.some(driver => driver.account_email === member.email)).map(member => <option key={member.id} value={member.id}>{member.name || member.email} · {member.email}</option>)}</UiSelect></UiLabel><UiBox className="xl:col-span-4"><UiButton disabled={busy} className="h-10 rounded-lg bg-slate-950 px-4 text-xs font-semibold text-white">{busy ? "Saving…" : "Save driver"}</UiButton></UiBox></UiForm>
+        </UiSection>}
+
+        <UiSection className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          {assetView === "vehicles" ? <div className="overflow-x-auto"><UiTable className="w-full min-w-[720px] text-left"><UiTableHead><UiTableRow><UiTh className="px-4 py-3 text-[10px] uppercase tracking-wide text-slate-500">Vehicle</UiTh><UiTh className="px-4 py-3 text-[10px] uppercase tracking-wide text-slate-500">Type and capacity</UiTh><UiTh className="px-4 py-3 text-[10px] uppercase tracking-wide text-slate-500">Fuel benchmark</UiTh><UiTh className="px-4 py-3 text-[10px] uppercase tracking-wide text-slate-500">Ownership</UiTh><UiTh className="px-4 py-3 text-[10px] uppercase tracking-wide text-slate-500">Status</UiTh></UiTableRow></UiTableHead><UiTableBody>{vehicles.filter(vehicle => `${vehicle.registration_number} ${vehicle.make_model || ""} ${vehicle.vehicle_type || ""}`.toLowerCase().includes(assetSearch.toLowerCase())).map(vehicle => <UiTableRow key={vehicle.id} className="border-t border-slate-100"><UiTd className="px-4 py-3"><UiText className="text-xs font-semibold text-slate-900">{vehicle.registration_number}</UiText><UiText className="mt-0.5 text-[10px] text-slate-500">{vehicle.make_model || "Model not recorded"}</UiText></UiTd><UiTd className="px-4 py-3 text-xs text-slate-700">{vehicle.vehicle_type || "Not configured"}<UiText className="mt-0.5 text-[10px] text-slate-500">{vehicle.capacity ? `${vehicle.capacity} ${vehicle.capacity_unit || ""}` : "Capacity not recorded"}</UiText></UiTd><UiTd className="px-4 py-3 text-xs tabular-nums text-slate-700">{vehicle.expected_km_per_litre ? `${vehicle.expected_km_per_litre} km/L` : "Not configured"}</UiTd><UiTd className="px-4 py-3 text-xs text-slate-700">{vehicle.ownership_type || "Not recorded"}</UiTd><UiTd className="px-4 py-3"><UiSpan className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${vehicle.status === "ACTIVE" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{vehicle.status === "ACTIVE" ? "Active" : vehicle.status.replaceAll("_", " ")}</UiSpan></UiTd></UiTableRow>)}</UiTableBody></UiTable>{!vehicles.some(vehicle => `${vehicle.registration_number} ${vehicle.make_model || ""} ${vehicle.vehicle_type || ""}`.toLowerCase().includes(assetSearch.toLowerCase())) && <EmptyState kind={assetSearch ? "search" : "empty"} title={assetSearch ? "No vehicles found" : "No vehicles registered"} description={assetSearch ? "Try a different registration or model." : "Register a vehicle to make it available for trip assignment."} actionLabel={assetSearch ? "Clear search" : "Add vehicle"} onAction={() => assetSearch ? setAssetSearch("") : setVehicleFormOpen(true)}/>}</div> : <div className="overflow-x-auto"><UiTable className="w-full min-w-[680px] text-left"><UiTableHead><UiTableRow><UiTh className="px-4 py-3 text-[10px] uppercase tracking-wide text-slate-500">Driver</UiTh><UiTh className="px-4 py-3 text-[10px] uppercase tracking-wide text-slate-500">Contact and reference</UiTh><UiTh className="px-4 py-3 text-[10px] uppercase tracking-wide text-slate-500">Driver account</UiTh><UiTh className="px-4 py-3 text-[10px] uppercase tracking-wide text-slate-500">Status</UiTh></UiTableRow></UiTableHead><UiTableBody>{drivers.filter(driver => `${driver.name} ${driver.contact_phone || ""} ${driver.reference_code || ""} ${driver.account_email || ""}`.toLowerCase().includes(assetSearch.toLowerCase())).map(driver => <UiTableRow key={driver.id} className="border-t border-slate-100"><UiTd className="px-4 py-3"><UiText className="text-xs font-semibold text-slate-900">{driver.name}</UiText><UiText className="mt-0.5 text-[10px] text-slate-500">{driver.reference_code || "No staff reference"}</UiText></UiTd><UiTd className="px-4 py-3 text-xs text-slate-700">{driver.contact_phone || "No phone recorded"}</UiTd><UiTd className="px-4 py-3 text-xs text-slate-700">{driver.account_email || "No sign-in account"}</UiTd><UiTd className="px-4 py-3"><UiSpan className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${driver.status === "ACTIVE" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{driver.status === "ACTIVE" ? "Active" : driver.status.replaceAll("_", " ")}</UiSpan></UiTd></UiTableRow>)}</UiTableBody></UiTable>{!drivers.some(driver => `${driver.name} ${driver.contact_phone || ""} ${driver.reference_code || ""} ${driver.account_email || ""}`.toLowerCase().includes(assetSearch.toLowerCase())) && <EmptyState kind={assetSearch ? "search" : "empty"} title={assetSearch ? "No drivers found" : "No drivers registered"} description={assetSearch ? "Try a different name, phone, or account." : "Add a driver and optionally link their phone trip-view account."} actionLabel={assetSearch ? "Clear search" : "Add driver"} onAction={() => assetSearch ? setAssetSearch("") : setDriverFormOpen(true)}/>}</div>}
+        </UiSection>
+      </>}
     {(!focusSection || focusSection === 'trip-create') && <>
     <UiBox className="mb-3"><UiH2 className="text-lg font-semibold">2. Create a trip</UiH2><UiText className="mt-1 text-sm text-slate-500">Choose an active truck and driver, then add the route and trip reference.</UiText></UiBox>
     <UiSection id="trip-create" className="mb-7 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(260px,.8fr)]">

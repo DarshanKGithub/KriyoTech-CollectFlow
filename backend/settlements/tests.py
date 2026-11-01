@@ -27,9 +27,11 @@ def env(db, settings, tmp_path):
     user = User.objects.create_user(username="settlement-finance", email="settlement-finance@example.test")
     member = Membership.objects.create(tenant=tenant, user=user, role="FINANCE")
     staff = User.objects.create_user(username="settlement-billing", email="settlement-billing@example.test")
-    AdminStaff.objects.create(user=staff, role="BILLING_ADMIN")
+    staff_profile = AdminStaff.objects.create(user=staff, role="BILLING_ADMIN")
     client = APIClient(); client.force_authenticate(user)
-    admin = APIClient(); admin.force_authenticate(staff)
+    admin = APIClient()
+    from admin_console.test_helpers import authenticate_staff
+    authenticate_staff(admin, staff_profile)
     merchant = SourceAccount.objects.create(scope="TENANT", tenant=tenant, name="Client gateway", kind="GATEWAY",
         provider="RAZORPAY", external_reference="acc_client", currency="INR")
     bank = SourceAccount.objects.create(scope="TENANT", tenant=tenant, name="Client bank", kind="BANK",

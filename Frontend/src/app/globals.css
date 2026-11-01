@@ -49,6 +49,22 @@ html.dark .admin-content .MuiDataGrid-cell { border-color: #33483d; }
 html.dark .admin-content .MuiDataGrid-row:hover { background: #233b30; }
 html.dark .MuiChartsAxis-tickLabel, html.dark .MuiChartsLegend-label { fill: #a4b8ad !important; }
 html.dark .MuiChartsGrid-line { stroke: #33483d !important; }
+.fleet-module-bar { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(12px); }
+.fleet-workspace .MuiPaper-root { border-radius: 14px; box-shadow: none; }
+.fleet-workspace .MuiPaper-outlined { border-color: #e2e8e5; }
+.fleet-workspace .MuiButton-root { border-radius: 10px; letter-spacing: 0; }
+.fleet-workspace .MuiOutlinedInput-root { border-radius: 10px; }
+.fleet-workspace .MuiTableContainer-root { border-radius: 12px; }
+.fleet-workspace .MuiOutlinedInput-root { min-height: 40px; }
+.fleet-workspace .MuiInputLabel-root { font-size: 13px; }
+.fleet-workspace .MuiTableHead-root .MuiTableCell-root { color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: .055em; text-transform: uppercase; }
+.fleet-workspace .MuiTableBody-root .MuiTableRow-root { transition: background-color 120ms ease; }
+.fleet-workspace .MuiTableBody-root .MuiTableRow-root:hover { background-color: rgba(22, 107, 85, .035); }
+.fleet-workspace .MuiAlert-root { border-radius: 12px; }
+.fleet-workspace .MuiChip-root { border-radius: 999px; font-weight: 600; }
+.fleet-workspace main { max-width: 1760px; margin-inline: auto; }
+html.dark .fleet-workspace .MuiPaper-outlined { border-color: #33483d; }
+html.dark .fleet-workspace .MuiTableBody-root .MuiTableRow-root:hover { background-color: rgba(110, 213, 178, .07); }
 @layer base {
   html.dark * { border-color: hsl(var(--border)); }
 }

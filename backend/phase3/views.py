@@ -291,24 +291,38 @@ class GmailSync(APIView):
         for item in messages[:500]:
             message_id = str(item.get("id", ""))[:255]
             if not message_id: continue
-            prior = EmailIngestionLog.objects.filter(tenant=request.tenant, provider="GMAIL", message_id=message_id).first()
-            if prior and prior.status in (EmailIngestionLog.Status.PROCESSED, EmailIngestionLog.Status.PARTIAL):
-                counters["messages_skipped"] += 1
-                message_results.append({"message_id": message_id, "status": "ALREADY_SYNCED"})
-                continue
+            claim_token = uuid.uuid4()
+            now = timezone.now()
+            with transaction.atomic():
+                log, created = EmailIngestionLog.objects.get_or_create(tenant=request.tenant, provider="GMAIL", message_id=message_id,
+                    defaults={"recipient": connection.email, "status": EmailIngestionLog.Status.PROCESSING,
+                        "claimed_at": now, "processing_token": claim_token})
+                log = EmailIngestionLog.objects.select_for_update().get(pk=log.pk)
+                if log.status in (EmailIngestionLog.Status.PROCESSED, EmailIngestionLog.Status.PARTIAL, EmailIngestionLog.Status.QUARANTINED):
+                    counters["messages_skipped"] += 1
+                    message_results.append({"message_id": message_id, "status": "ALREADY_SYNCED"})
+                    continue
+                if not created and log.status == EmailIngestionLog.Status.PROCESSING and log.claimed_at and log.claimed_at > now - timedelta(minutes=15):
+                    counters["messages_skipped"] += 1
+                    message_results.append({"message_id": message_id, "status": "ALREADY_PROCESSING"})
+                    continue
+                log.status = EmailIngestionLog.Status.PROCESSING
+                log.processing_token = claim_token
+                log.claimed_at = now
+                log.error = ""
+                if not created:
+                    log.retry_count += 1
+                log.save(update_fields=["status", "processing_token", "claimed_at", "error", "retry_count"])
             try:
+                # Gmail calls happen after the short durable-claim transaction closes.
                 message = gmail_api(access_token, f"messages/{message_id}", {"format": "full"})
                 headers = {str(h.get("name", "")).lower(): str(h.get("value", "")) for h in message.get("payload", {}).get("headers", [])}
                 sender = parseaddr(headers.get("from", ""))[1][:254]
                 subject = headers.get("subject", "")[:500]
                 internal_date = message.get("internalDate")
                 received_at = datetime.fromtimestamp(int(internal_date) / 1000, tz=timezone.get_current_timezone()) if str(internal_date or "").isdigit() else None
-                log, created = EmailIngestionLog.objects.get_or_create(tenant=request.tenant, provider="GMAIL", message_id=message_id,
-                    defaults={"sender": sender, "recipient": connection.email, "subject": subject, "received_at": received_at, "status": EmailIngestionLog.Status.PROCESSING})
-                if not created:
-                    log.sender, log.recipient, log.subject, log.received_at = sender, connection.email, subject, received_at
-                    log.status = EmailIngestionLog.Status.PROCESSING; log.error = ""; log.retry_count += 1
-                    log.save(update_fields=["sender", "recipient", "subject", "received_at", "status", "error", "retry_count"])
+                EmailIngestionLog.objects.filter(pk=log.pk, processing_token=claim_token).update(
+                    sender=sender, recipient=connection.email, subject=subject, received_at=received_at)
                 attachments = []
                 def collect(part):
                     filename = str(part.get("filename", "")).strip()
@@ -327,11 +341,8 @@ class GmailSync(APIView):
                     for child in part.get("parts", []): collect(child)
                 collect(message.get("payload", {}))
                 result_rows = []
-                if len(attachments) > 20 or sum(len(data) for _, _, data in attachments if data is not None) > 100 * 1024 * 1024:
-                    log.status = EmailIngestionLog.Status.QUARANTINED
-                    log.error = "Email exceeds the attachment count or total size limit"
-                    log.processed_at = timezone.now()
-                    log.save(update_fields=["status", "error", "processed_at"])
+                oversized_message = len(attachments) > 20 or sum(len(data) for _, _, data in attachments if data is not None) > 100 * 1024 * 1024
+                if oversized_message:
                     counters["attachments_quarantined"] += len(attachments)
                 else:
                     for filename, mime, content in attachments:
@@ -343,6 +354,8 @@ class GmailSync(APIView):
                         candidate_doc = Document.objects.filter(tenant=request.tenant, checksum_sha256=digest).first()
                         candidate = Invoice.objects.filter(tenant=request.tenant, document=candidate_doc).first() if candidate_doc else None
                         with transaction.atomic():
+                            if not EmailIngestionLog.objects.select_for_update().filter(pk=log.pk, processing_token=claim_token).exists():
+                                raise RuntimeError("GMAIL_CLAIM_EXPIRED")
                             document = Document.objects.create(tenant=request.tenant, filename=filename, media_type=mime, checksum_sha256=digest, size_bytes=len(content), file=ContentFile(content, name=filename))
                             invoice = Invoice.objects.create(tenant=request.tenant, document=document, status=Invoice.Status.REVIEW_REQUIRED,
                                 source_email={"message_id": message_id, "sender": sender, "subject": subject})
@@ -362,11 +375,19 @@ class GmailSync(APIView):
                                 queue_invoice_extraction(invoice, request.user)
                         result_rows.append({"filename": filename, "checksum": digest, "invoice_id": str(invoice.id), "status": invoice.status})
                         counters["attachments_imported"] += 1
-                    log.attachment_results = result_rows
-                    log.status = EmailIngestionLog.Status.PROCESSED if result_rows and all(row["status"] != "QUARANTINED" for row in result_rows) else EmailIngestionLog.Status.PARTIAL
-                    log.error = "" if attachments else "Email received without invoice attachments"
-                    log.processed_at = timezone.now()
-                    log.save(update_fields=["attachment_results", "status", "error", "processed_at"])
+                with transaction.atomic():
+                    completed_log = EmailIngestionLog.objects.select_for_update().filter(pk=log.pk, processing_token=claim_token).first()
+                    if not completed_log:
+                        raise RuntimeError("GMAIL_CLAIM_EXPIRED")
+                    completed_log.attachment_results = result_rows
+                    completed_log.status = EmailIngestionLog.Status.QUARANTINED if oversized_message else (
+                        EmailIngestionLog.Status.PROCESSED if result_rows and all(row["status"] != "QUARANTINED" for row in result_rows) else EmailIngestionLog.Status.PARTIAL)
+                    completed_log.error = "Email exceeds the attachment count or total size limit" if oversized_message else ("" if attachments else "Email received without invoice attachments")
+                    completed_log.processed_at = timezone.now()
+                    completed_log.claimed_at = None
+                    completed_log.processing_token = None
+                    completed_log.save(update_fields=["attachment_results", "status", "error", "processed_at", "claimed_at", "processing_token"])
+                    log = completed_log
                 counters["messages_checked"] += 1
                 if log.attachment_results: counters["messages_imported"] += 1
                 message_results.append({"message_id": message_id, "status": log.status, "attachments": log.attachment_results})
@@ -376,9 +397,11 @@ class GmailSync(APIView):
                     connection.encrypted_refresh_token = ""
                     connection.save(update_fields=["active", "encrypted_refresh_token", "updated_at"])
                     AuditLog.objects.create(tenant=request.tenant, actor=request.user, action="GMAIL_REAUTH_REQUIRED", object_type="GmailConnection", object_id=str(connection.id), metadata={})
+                    EmailIngestionLog.objects.filter(pk=log.pk, processing_token=claim_token).update(status=EmailIngestionLog.Status.FAILED,
+                        error="Gmail authorization expired; reconnect the mailbox.", processed_at=timezone.now(), claimed_at=None, processing_token=None)
                     return Response({"error": "Gmail authorization expired. Reconnect the mailbox to continue."}, status=409)
-                EmailIngestionLog.objects.update_or_create(tenant=request.tenant, provider="GMAIL", message_id=message_id,
-                    defaults={"recipient": connection.email, "status": EmailIngestionLog.Status.FAILED, "error": str(exc)[:1000], "processed_at": timezone.now()})
+                EmailIngestionLog.objects.filter(pk=log.pk, processing_token=claim_token).update(status=EmailIngestionLog.Status.FAILED,
+                    recipient=connection.email, error=str(exc)[:1000], processed_at=timezone.now(), claimed_at=None, processing_token=None)
                 message_results.append({"message_id": message_id, "status": "FAILED"})
         AuditLog.objects.create(tenant=request.tenant, actor=request.user, action="GMAIL_MAILBOX_SYNCED", object_type="GmailConnection", object_id=str(connection.id), metadata=counters)
         return Response({"window_days": 30, "message_limit": 25, **counters, "results": message_results})
@@ -681,14 +704,17 @@ class VendorPortalAccess(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "vendor_portal"
     allowed_types = {"application/pdf": b"%PDF-", "image/png": b"\x89PNG\r\n\x1a\n", "image/jpeg": b"\xff\xd8\xff"}
-    def get_invite(self, token):
+    def get_invite(self, token, method="GET"):
         digest = hashlib.sha256(token.encode()).hexdigest()
         invite = VendorPortalInvite.objects.select_related("tenant", "vendor").filter(token_hash=digest, revoked_at__isnull=True, expires_at__gt=timezone.now()).first()
-        if invite:
+        from accounts.workspace_access import workspace_access_denial
+        if invite and not workspace_access_denial(invite.tenant, method=method):
             invite.last_used_at = timezone.now(); invite.save(update_fields=["last_used_at"])
+        else:
+            return None
         return invite
     def get(self, request, token, invoice_id=None):
-        invite = self.get_invite(token)
+        invite = self.get_invite(token, request.method)
         if not invite: return Response({"error": "This portal link is invalid, expired, or revoked."}, status=404)
         if invoice_id:
             invoice = Invoice.objects.filter(tenant=invite.tenant, vendor=invite.vendor, id=invoice_id).first()
@@ -699,7 +725,7 @@ class VendorPortalAccess(APIView):
         return Response({"vendor": invite.vendor.name, "workspace": invite.tenant.name, "expires_at": invite.expires_at, "invoices": [{"id": str(x.id), "invoice_number": x.invoice_number, "invoice_date": x.invoice_date, "due_date": x.due_date, "amount": x.invoice_total, "status": x.status, "payment_status": x.payment_status} for x in invoices]})
     @transaction.atomic
     def post(self, request, token, invoice_id=None):
-        invite = self.get_invite(token)
+        invite = self.get_invite(token, request.method)
         if not invite: return Response({"error": "This portal link is invalid, expired, or revoked."}, status=404)
         if request.data.get("action") == "message":
             invoice = Invoice.objects.filter(tenant=invite.tenant, vendor=invite.vendor, id=invoice_id or request.data.get("invoice_id")).first()
@@ -929,6 +955,10 @@ class APIKeyScopePermission(BasePermission):
         if not isinstance(key, TenantAPIKey) or key.revoked_at is not None: return False
         membership = Membership.objects.filter(tenant=key.tenant, user=request.user, is_active=True).first()
         if not membership or getattr(view, "required_scope", "") not in key.scopes: return False
+        from accounts.workspace_access import workspace_access_denial
+        if workspace_access_denial(key.tenant, method=request.method, membership=membership): return False
+        from admin_console.services import has_feature
+        if key.tenant.admin_subscriptions.exists() and not has_feature(key.tenant, "api_access"): return False
         request.tenant, request.membership = key.tenant, membership
         return True
 
@@ -938,9 +968,6 @@ class ExternalInvoiceAPI(APIView):
     permission_classes = [APIKeyScopePermission]
     required_scope = "invoices:read"
     def get(self, request):
-        from admin_console.services import has_feature
-        if request.tenant.admin_subscriptions.exists() and not has_feature(request.tenant, "api_access"):
-            return Response({"error": "Public API access is not enabled for this plan."}, status=403)
         rows = Invoice.objects.filter(tenant=request.tenant).select_related("vendor").order_by("-created_at")[:200]
         return Response({"results": [{"id": str(x.id), "invoice_number": x.invoice_number, "supplier": x.supplier_name or (x.vendor.name if x.vendor_id else ""), "invoice_date": x.invoice_date, "due_date": x.due_date, "currency": "INR", "total": x.invoice_total, "status": x.status, "payment_status": x.payment_status} for x in rows]})
 

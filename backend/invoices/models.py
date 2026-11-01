@@ -1,5 +1,5 @@
 import uuid
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from tenants.models import Tenant
 from accounts.models import User
@@ -45,6 +45,12 @@ class Invoice(models.Model):
             self.financial_locked_at = timezone.now()
             if kwargs.get("update_fields") is not None:
                 kwargs["update_fields"] = set(kwargs["update_fields"]) | {"financial_locked_at"}
+        if self._state.adding and self.tenant_id:
+            from .quota import enforce_invoice_quota
+            with transaction.atomic():
+                enforce_invoice_quota(self.tenant)
+                super().save(*args, **kwargs)
+            return
         super().save(*args, **kwargs)
 
 class InvoiceLine(models.Model):

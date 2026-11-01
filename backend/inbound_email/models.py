@@ -16,6 +16,8 @@ class EmailIngestionLog(models.Model):
     attachment_results = models.JSONField(default=list)
     error = models.TextField(blank=True)
     retry_count = models.PositiveSmallIntegerField(default=0)
+    claimed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    processing_token = models.UUIDField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     processed_at = models.DateTimeField(null=True, blank=True)
     class Meta:

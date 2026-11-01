@@ -178,10 +178,12 @@ class InviteUser(APIView):
 
 class AcceptInvitation(APIView):
     permission_classes = []
+    @transaction.atomic
     def post(self, request):
         token = request.data.get("token", "")
-        invitation = Invitation.objects.select_related("tenant").filter(token_hash=hashlib.sha256(token.encode()).hexdigest(), accepted_at__isnull=True, expires_at__gt=timezone.now()).first()
+        invitation = Invitation.objects.select_for_update().select_related("tenant").filter(token_hash=hashlib.sha256(token.encode()).hexdigest(), accepted_at__isnull=True, expires_at__gt=timezone.now()).first()
         if not invitation: return Response({"error": {"code": "NOT_FOUND", "message": "Invitation is invalid or expired"}}, status=404)
+        Tenant.objects.select_for_update().get(pk=invitation.tenant_id)
         password = request.data.get("password", "")
         if len(password) < 10: return Response({"error": {"code": "VALIDATION_ERROR", "message": "Password must contain at least 10 characters"}}, status=400)
         user = User.objects.filter(email__iexact=invitation.email).first()
@@ -191,6 +193,8 @@ class AcceptInvitation(APIView):
             user = User.objects.create_user(username=invitation.email, email=invitation.email, password=password, first_name=request.data.get("name", ""))
         membership, created = Membership.objects.get_or_create(tenant=invitation.tenant, user=user, defaults={"role": invitation.role})
         if not created and (membership.role != invitation.role or not membership.is_active):
+            if membership.is_active and membership.role == Membership.Role.OWNER and invitation.role != Membership.Role.OWNER and not Membership.objects.filter(tenant=invitation.tenant, is_active=True, role=Membership.Role.OWNER).exclude(pk=membership.pk).exists():
+                return Response({"error": {"code": "LAST_OWNER", "message": "A workspace must have at least one active owner."}}, status=409)
             membership.role = invitation.role; membership.is_active = True; membership.save(update_fields=["role", "is_active"])
         invitation.accepted_at = timezone.now(); invitation.save(update_fields=["accepted_at"])
         AuditLog.objects.create(tenant=invitation.tenant, actor=user, action="INVITATION_ACCEPTED", object_type="Invitation", object_id=str(invitation.id), metadata={})
@@ -202,10 +206,17 @@ class UserList(APIView):
         return Response([{"id": str(m.user_id), "email": m.user.email, "name": m.user.get_full_name(), "role": m.role, "is_active": m.is_active} for m in Membership.objects.filter(tenant=request.tenant).select_related("user")])
     def patch(self, request, user_id):
         if request.membership.role != "OWNER": return Response({"error": {"code": "PERMISSION_DENIED", "message": "Owner role required"}}, status=403)
-        member = get_object_or_404(Membership, tenant=request.tenant, user_id=user_id)
-        role = request.data.get("role")
-        if role not in Membership.Role.values: return Response({"error": {"code": "VALIDATION_ERROR", "message": "Invalid role"}}, status=400)
-        old_role = member.role; member.role = role; member.save(update_fields=["role"])
+        from django.db import transaction
+        with transaction.atomic():
+            Tenant.objects.select_for_update().get(pk=request.tenant.pk)
+            member = get_object_or_404(Membership.objects.select_for_update(), tenant=request.tenant, user_id=user_id)
+            role = request.data.get("role")
+            if role not in Membership.Role.values: return Response({"error": {"code": "VALIDATION_ERROR", "message": "Invalid role"}}, status=400)
+            if member.is_active and member.role == Membership.Role.OWNER and role != Membership.Role.OWNER:
+                other_owners = Membership.objects.filter(tenant=request.tenant, is_active=True, role=Membership.Role.OWNER).exclude(pk=member.pk).count()
+                if other_owners == 0:
+                    return Response({"error": {"code": "LAST_OWNER", "message": "A workspace must have at least one active owner."}}, status=409)
+            old_role = member.role; member.role = role; member.save(update_fields=["role"])
         AuditLog.objects.create(tenant=request.tenant, actor=request.user, action="ROLE_CHANGED", object_type="Membership", object_id=str(member.id), metadata={"from": old_role, "to": role})
         return Response({"id": str(member.user_id), "role": role})
 

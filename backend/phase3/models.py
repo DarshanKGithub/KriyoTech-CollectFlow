@@ -240,7 +240,7 @@ class WebhookEndpoint(models.Model):
 
 
 class WebhookDelivery(models.Model):
-    class Status(models.TextChoices): QUEUED = "QUEUED"; DELIVERED = "DELIVERED"; RETRY = "RETRY"; FAILED = "FAILED"
+    class Status(models.TextChoices): QUEUED = "QUEUED"; DELIVERING = "DELIVERING"; DELIVERED = "DELIVERED"; RETRY = "RETRY"; FAILED = "FAILED"
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     endpoint = models.ForeignKey(WebhookEndpoint, on_delete=models.CASCADE, related_name="deliveries")
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
@@ -254,6 +254,7 @@ class WebhookDelivery(models.Model):
     response_code = models.PositiveSmallIntegerField(null=True, blank=True)
     error = models.CharField(max_length=500, blank=True)
     next_attempt_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    claimed_at = models.DateTimeField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
     class Meta:

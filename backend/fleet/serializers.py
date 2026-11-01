@@ -5,7 +5,7 @@ from django.db.models import Q, Sum
 
 from documents.models import Document
 from accounts.models import Membership
-from .models import DriverAdvance, DriverAdvanceRecovery, DriverExpenseSettlement, DriverPayPolicy, DriverSalaryAdjustment, DriverSalaryPayment, DriverSalaryRecord, DriverTripEarning, FleetCustomer, FleetDriver, FleetFollowUp, FleetTrip, FleetVehicle, TransportCollection, TransportInvoice, TransportOrder, TripExpenseLine, TripRevenueLine
+from .models import DriverAdvance, DriverAdvanceRecovery, DriverExpenseSettlement, DriverPayPolicy, DriverSalaryAdjustment, DriverSalaryPayment, DriverSalaryRecord, DriverTripEarning, FleetCustomer, FleetDriver, FleetFollowUp, FleetTrip, FleetTripManifestItem, FleetTripStop, FleetVehicle, TransportCollection, TransportInvoice, TransportOrder, TripExpenseLine, TripRevenueLine
 
 
 class FleetVehicleSerializer(serializers.ModelSerializer):
@@ -92,7 +92,7 @@ class TransportOrderSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TransportOrder
-        fields = ["id", "order_number", "customer_id", "customer", "origin", "destination", "pickup_due_at", "delivery_due_at", "cargo_description", "required_vehicle_type", "load_quantity", "load_unit", "agreed_amount", "customer_reference", "status", "notes", "trip_id", "created_at", "updated_at"]
+        fields = ["id", "order_number", "customer_id", "customer", "origin", "destination", "origin_latitude", "origin_longitude", "destination_latitude", "destination_longitude", "pickup_due_at", "delivery_due_at", "cargo_description", "required_vehicle_type", "load_quantity", "load_unit", "agreed_amount", "customer_reference", "status", "notes", "trip_id", "created_at", "updated_at"]
         read_only_fields = ["id", "status", "trip_id", "created_at", "updated_at"]
 
     def get_customer(self, obj):
@@ -102,7 +102,8 @@ class TransportOrderSerializer(serializers.ModelSerializer):
         try:
             return str(obj.trip.id)
         except FleetTrip.DoesNotExist:
-            return None
+            item = obj.manifest_items.exclude(trip__status=FleetTrip.Status.CANCELLED).select_related("trip").order_by("created_at").first()
+            return str(item.trip_id) if item else None
 
     def validate(self, attrs):
         tenant = self.context["tenant"]
@@ -126,6 +127,12 @@ class TransportOrderSerializer(serializers.ModelSerializer):
         attrs["destination"] = attrs.get("destination", getattr(self.instance, "destination", "")).strip()
         if not attrs["order_number"] or not attrs["origin"] or not attrs["destination"]:
             raise serializers.ValidationError("Order number, pickup location, and delivery location are required.")
+        for prefix in ("origin", "destination"):
+            latitude, longitude = attrs.get(f"{prefix}_latitude"), attrs.get(f"{prefix}_longitude")
+            if (latitude is None) != (longitude is None):
+                raise serializers.ValidationError({f"{prefix}_latitude": "Enter both coordinates or leave both blank."})
+            if latitude is not None and (not Decimal("-90") <= latitude <= Decimal("90") or not Decimal("-180") <= longitude <= Decimal("180")):
+                raise serializers.ValidationError({f"{prefix}_latitude": "Enter valid latitude and longitude coordinates."})
         return attrs
 
 
@@ -133,6 +140,7 @@ class TransportOrderSerializer(serializers.ModelSerializer):
 
 class TransportInvoiceCreateSerializer(serializers.Serializer):
     trip_id = serializers.UUIDField()
+    order_id = serializers.UUIDField(required=False)
     invoice_number = serializers.CharField(max_length=64, required=False, allow_blank=True)
     invoice_date = serializers.DateField(required=False)
     due_date = serializers.DateField(required=False, allow_null=True)
@@ -212,10 +220,12 @@ class FleetTripSerializer(serializers.ModelSerializer):
     eta_error_minutes = serializers.SerializerMethodField()
     delivery_proof_id = serializers.UUIDField(write_only=True, required=False, allow_null=True)
     delivery_proof_name = serializers.CharField(source="delivery_proof.filename", read_only=True, default=None)
+    manifest_items = serializers.SerializerMethodField()
+    stops = serializers.SerializerMethodField()
 
     class Meta:
         model = FleetTrip
-        fields = ["id", "trip_number", "vehicle_id", "driver_id", "transport_order_id", "vehicle", "driver", "transport_order", "customer_reference", "origin", "destination", "starts_at", "ends_at", "pickup_at", "loaded_at", "delivery_at", "predicted_arrival_at", "eta_source", "eta_error_minutes", "delay_reason", "odometer_start", "odometer_end", "delivery_proof_id", "delivery_proof_name", "delivery_signature_name", "status", "review_note", "revenue_lines", "expense_lines", "revenue_total", "expense_total", "margin", "driver_earning", "created_at", "updated_at"]
+        fields = ["id", "trip_number", "vehicle_id", "driver_id", "transport_order_id", "vehicle", "driver", "transport_order", "manifest_items", "stops", "customer_reference", "origin", "destination", "starts_at", "ends_at", "pickup_at", "loaded_at", "delivery_at", "predicted_arrival_at", "eta_source", "eta_error_minutes", "delay_reason", "odometer_start", "odometer_end", "delivery_proof_id", "delivery_proof_name", "delivery_signature_name", "status", "review_note", "revenue_lines", "expense_lines", "revenue_total", "expense_total", "margin", "driver_earning", "created_at", "updated_at"]
         read_only_fields = ["id", "status", "review_note", "pickup_at", "loaded_at", "delivery_at", "predicted_arrival_at", "eta_source", "eta_error_minutes", "delivery_proof_name", "revenue_lines", "expense_lines", "revenue_total", "expense_total", "margin", "created_at", "updated_at"]
 
     def get_vehicle(self, obj):
@@ -232,6 +242,26 @@ class FleetTripSerializer(serializers.ModelSerializer):
         if order is None:
             return None
         return {"id": str(order.id), "order_number": order.order_number, "customer_name": order.customer.name}
+
+    def get_manifest_items(self, obj):
+        items = list(obj.manifest_items.all())
+        if not items and obj.transport_order_id:
+            return [{"order_id": str(obj.transport_order_id), "order_number": obj.transport_order.order_number,
+                     "customer": obj.transport_order.customer.name, "quantity": str(obj.transport_order.load_quantity) if obj.transport_order.load_quantity is not None else None,
+                     "load_unit": obj.transport_order.load_unit}]
+        return [{"order_id": str(item.order_id), "order_number": item.order.order_number,
+                 "customer": item.order.customer.name, "quantity": str(item.quantity) if item.quantity is not None else None,
+                 "load_unit": item.load_unit} for item in items]
+
+    def get_stops(self, obj):
+        return [{"id": str(stop.id), "sequence": stop.sequence, "order_id": str(stop.order_id),
+                 "order_number": stop.order.order_number, "kind": stop.kind, "address": stop.address,
+                 "latitude": str(stop.latitude) if stop.latitude is not None else None,
+                 "longitude": str(stop.longitude) if stop.longitude is not None else None,
+                 "window_start": stop.window_start.isoformat() if stop.window_start else None,
+                 "window_end": stop.window_end.isoformat() if stop.window_end else None,
+                 "service_minutes": stop.service_minutes, "planned_at": stop.planned_at.isoformat() if stop.planned_at else None,
+                 "status": stop.status} for stop in obj.stops.select_related("order").order_by("sequence")]
 
     def _totals(self, obj):
         cached = getattr(obj, "_fleet_totals_cache", None)

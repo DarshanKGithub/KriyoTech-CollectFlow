@@ -32,6 +32,9 @@ def extract_invoice(self, invoice_id, extraction_id=None):
     # Claim under the invoice lock so duplicate deliveries never run together.
     with transaction.atomic():
         invoice = Invoice.objects.select_for_update(of=("self",)).select_related("document").get(id=invoice_id)
+        from accounts.workspace_access import workspace_is_operational
+        if not workspace_is_operational(invoice.tenant):
+            return {"status": "WORKSPACE_UNAVAILABLE"}
         if not invoice.document_id:
             return {"status": "MANUAL_ENTRY"}
         if extraction_id:

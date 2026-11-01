@@ -11,7 +11,7 @@ class HasTenantMembership(BasePermission):
         if not request.user or not request.user.is_authenticated:
             return False
 
-        memberships = Membership.objects.filter(user=request.user, is_active=True)
+        memberships = Membership.objects.filter(user=request.user, is_active=True, tenant__is_deleted=False)
         workspace = request.headers.get("X-Workspace")
         if workspace: memberships = memberships.filter(tenant__workspace_key=workspace)
         membership = memberships.select_related("tenant").first()
@@ -27,12 +27,18 @@ class HasTenantMembership(BasePermission):
         role = membership.role
         path = request.path_info
         method = request.method.upper()
-        if membership.branch_scope_enabled and not (
+        branch_safe_path = (
             (path == "/api/v1/auth/me" and method == "GET")
             or (path == "/api/v1/branches" and method == "GET")
             or (path == "/api/v1/auth/logout" and method == "POST")
-        ):
-            raise PermissionDenied("Branch access is not enabled for this workflow yet. Ask an owner to disable branch scope or use an unscoped workspace role.")
+        )
+        from accounts.workspace_access import latest_subscription, workspace_access_denial
+        subscription = latest_subscription(membership.tenant)
+        request.subscription = subscription
+        denial = workspace_access_denial(membership.tenant, method=method, membership=membership,
+            branch_aware=branch_safe_path, allow_billing_recovery=path.startswith("/api/v1/billing/razorpay/"))
+        if denial:
+            raise PermissionDenied(denial)
         owner = {Membership.Role.OWNER}
         finance = owner | {Membership.Role.FINANCE}
         approvers = finance | {Membership.Role.APPROVER}
@@ -105,19 +111,8 @@ class HasTenantMembership(BasePermission):
             allowed = None
         if allowed is not None and role not in allowed:
             raise PermissionDenied("Your workspace role does not have access to this action.")
-        from admin_console.models import Subscription, TenantUsage
-        subscription = membership.tenant.admin_subscriptions.select_related("plan").order_by("-created_at").first()
-        request.subscription = subscription
+        from admin_console.models import TenantUsage
         if subscription:
-            path = request.path_info
-            if subscription.status in {Subscription.Status.SUSPENDED, Subscription.Status.CHURNED}:
-                raise PermissionDenied("This workspace is suspended. Contact KriyoPay support.")
-            read_only = subscription.status in {Subscription.Status.PAST_DUE, Subscription.Status.CANCELLED, Subscription.Status.ONBOARDING}
-            if subscription.status == Subscription.Status.TRIAL and subscription.trial_ends_at and subscription.trial_ends_at <= timezone.now():
-                read_only = True
-            is_billing_recovery = path.startswith("/api/v1/billing/razorpay/")
-            if read_only and request.method not in SAFE_METHODS and not is_billing_recovery:
-                raise PermissionDenied("This workspace is read-only. Review billing status or contact your administrator.")
             feature_key = None
             if request.method == "POST" and path.rstrip("/").endswith("/invoices"):
                 feature_key = "invoice_upload"
@@ -155,7 +150,9 @@ class HasTenantMembership(BasePermission):
                 if feature_key == "invoice_upload":
                     period_start = timezone.localdate().replace(day=1)
                     usage = TenantUsage.objects.filter(tenant=membership.tenant, period_start=period_start, metric="invoices_uploaded").values_list("used_count", flat=True).first() or 0
-                    invoice_limit = entitlement.get("limit_value") or subscription.plan.invoice_limit
+                    invoice_limit = entitlement.get("limit_value")
+                    if invoice_limit is None:
+                        invoice_limit = subscription.plan.invoice_limit
                     if invoice_limit is not None and usage >= invoice_limit:
                         raise PermissionDenied("Your monthly invoice limit has been reached. Contact your administrator to upgrade or request a temporary limit extension.")
         return True

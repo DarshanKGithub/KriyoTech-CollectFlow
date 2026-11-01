@@ -143,8 +143,10 @@ class TransportOrder(models.Model):
     class Status(models.TextChoices):
         OPEN = "OPEN", "Open"
         ASSIGNED = "ASSIGNED", "Assigned"
+        PARTIALLY_ASSIGNED = "PARTIALLY_ASSIGNED", "Partially assigned"
         LOADING = "LOADING", "At pickup"
         IN_TRANSIT = "IN_TRANSIT", "In transit"
+        PARTIALLY_DELIVERED = "PARTIALLY_DELIVERED", "Partially delivered"
         DELIVERED = "DELIVERED", "Delivered"
         CANCELLED = "CANCELLED", "Cancelled"
 
@@ -154,6 +156,10 @@ class TransportOrder(models.Model):
     customer = models.ForeignKey(FleetCustomer, on_delete=models.PROTECT, related_name="transport_orders")
     origin = models.CharField(max_length=180)
     destination = models.CharField(max_length=180)
+    origin_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    origin_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    destination_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    destination_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     pickup_due_at = models.DateTimeField(null=True, blank=True)
     delivery_due_at = models.DateTimeField(null=True, blank=True)
     cargo_description = models.CharField(max_length=240, blank=True)
@@ -162,14 +168,18 @@ class TransportOrder(models.Model):
     load_unit = models.CharField(max_length=32, blank=True)
     agreed_amount = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
     customer_reference = models.CharField(max_length=160, blank=True)
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN)
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.OPEN)
     notes = models.TextField(blank=True)
     created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="transport_orders_created")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["tenant", "order_number"], name="uniq_transport_order_number")]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "order_number"], name="uniq_transport_order_number"),
+            models.CheckConstraint(condition=Q(origin_latitude__isnull=True, origin_longitude__isnull=True) | Q(origin_latitude__isnull=False, origin_longitude__isnull=False), name="order_origin_coordinates_pair"),
+            models.CheckConstraint(condition=Q(destination_latitude__isnull=True, destination_longitude__isnull=True) | Q(destination_latitude__isnull=False, destination_longitude__isnull=False), name="order_destination_coordinates_pair"),
+        ]
         indexes = [models.Index(fields=["tenant", "status", "created_at"]), models.Index(fields=["tenant", "customer", "created_at"])]
 
 
@@ -370,6 +380,158 @@ class FleetTrip(models.Model):
         indexes = [models.Index(fields=["tenant", "status", "starts_at"]), models.Index(fields=["tenant", "vehicle", "starts_at"]), models.Index(fields=["tenant", "driver", "starts_at"])]
 
 
+class FleetTripManifestItem(models.Model):
+    """A shipment allocation carried by a trip; quantities may be split across trips."""
+    class Status(models.TextChoices):
+        ASSIGNED = "ASSIGNED", "Assigned"
+        IN_TRANSIT = "IN_TRANSIT", "In transit"
+        DELIVERED = "DELIVERED", "Delivered"
+        CANCELLED = "CANCELLED", "Cancelled"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_trip_manifest_items")
+    trip = models.ForeignKey(FleetTrip, on_delete=models.CASCADE, related_name="manifest_items")
+    order = models.ForeignKey(TransportOrder, on_delete=models.PROTECT, related_name="manifest_items")
+    quantity = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
+    load_unit = models.CharField(max_length=32, blank=True)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.ASSIGNED)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["trip", "order"], name="uniq_trip_manifest_order"),
+            models.CheckConstraint(condition=Q(quantity__isnull=True) | Q(quantity__gt=0), name="manifest_quantity_positive"),
+        ]
+        indexes = [models.Index(fields=["tenant", "order", "trip"])]
+
+
+class FleetTripStop(models.Model):
+    class Kind(models.TextChoices):
+        PICKUP = "PICKUP", "Pickup"
+        DELIVERY = "DELIVERY", "Delivery"
+
+    class Status(models.TextChoices):
+        PLANNED = "PLANNED", "Planned"
+        ARRIVED = "ARRIVED", "Arrived"
+        COMPLETED = "COMPLETED", "Completed"
+        SKIPPED = "SKIPPED", "Skipped"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_trip_stops")
+    trip = models.ForeignKey(FleetTrip, on_delete=models.CASCADE, related_name="stops")
+    order = models.ForeignKey(TransportOrder, on_delete=models.PROTECT, related_name="trip_stops")
+    sequence = models.PositiveSmallIntegerField()
+    kind = models.CharField(max_length=10, choices=Kind.choices)
+    address = models.CharField(max_length=240)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    window_start = models.DateTimeField(null=True, blank=True)
+    window_end = models.DateTimeField(null=True, blank=True)
+    service_minutes = models.PositiveSmallIntegerField(default=30)
+    planned_at = models.DateTimeField(null=True, blank=True)
+    actual_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PLANNED)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["trip", "sequence"], name="uniq_trip_stop_sequence"),
+            models.CheckConstraint(condition=Q(latitude__isnull=True, longitude__isnull=True) | Q(latitude__isnull=False, longitude__isnull=False), name="trip_stop_coordinates_pair"),
+            models.CheckConstraint(condition=Q(window_end__isnull=True) | Q(window_start__isnull=True) | Q(window_end__gte=models.F("window_start")), name="trip_stop_window_valid"),
+        ]
+        indexes = [models.Index(fields=["tenant", "trip", "sequence"]), models.Index(fields=["tenant", "order", "kind"])]
+
+
+class FleetDriverSchedule(models.Model):
+    class Kind(models.TextChoices):
+        SHIFT = "SHIFT", "Available shift"
+        LEAVE = "LEAVE", "Leave"
+        UNAVAILABLE = "UNAVAILABLE", "Unavailable"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_driver_schedules")
+    driver = models.ForeignKey(FleetDriver, on_delete=models.CASCADE, related_name="schedule_entries")
+    kind = models.CharField(max_length=12, choices=Kind.choices)
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField()
+    note = models.CharField(max_length=240, blank=True)
+    active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name="fleet_driver_schedules_created")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=Q(ends_at__gt=models.F("starts_at")), name="driver_schedule_end_after_start")]
+        indexes = [models.Index(fields=["tenant", "driver", "kind", "starts_at", "ends_at"])]
+
+
+class FleetResourceReservation(models.Model):
+    """Confirmed dispatch horizon reservation; protected by locked resource checks."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_resource_reservations")
+    trip = models.OneToOneField(FleetTrip, on_delete=models.CASCADE, related_name="dispatch_reservation")
+    vehicle = models.ForeignKey(FleetVehicle, on_delete=models.PROTECT, related_name="dispatch_reservations")
+    driver = models.ForeignKey(FleetDriver, on_delete=models.PROTECT, related_name="dispatch_reservations")
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField()
+    released_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=Q(ends_at__gt=models.F("starts_at")), name="resource_reservation_end_after_start")]
+        indexes = [models.Index(fields=["tenant", "vehicle", "released_at", "starts_at", "ends_at"]), models.Index(fields=["tenant", "driver", "released_at", "starts_at", "ends_at"])]
+
+
+class FleetDispatchPlan(models.Model):
+    class Status(models.TextChoices):
+        PROPOSED = "PROPOSED", "Awaiting confirmation"
+        CONFIRMED = "CONFIRMED", "Confirmed"
+        EXPIRED = "EXPIRED", "Expired"
+        FAILED = "FAILED", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_dispatch_plans")
+    request_key = models.UUIDField()
+    input_fingerprint = models.CharField(max_length=64)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PROPOSED)
+    snapshot = models.JSONField(default=dict)
+    selected_option = models.JSONField(default=dict, blank=True)
+    starts_at = models.DateTimeField()
+    expires_at = models.DateTimeField()
+    confirmed_trip = models.ForeignKey(FleetTrip, null=True, blank=True, on_delete=models.PROTECT, related_name="dispatch_plans_confirmed")
+    created_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name="fleet_dispatch_plans_created")
+    confirmed_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name="fleet_dispatch_plans_confirmed_by")
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "request_key"], name="uniq_fleet_dispatch_request")]
+        indexes = [models.Index(fields=["tenant", "status", "expires_at"])]
+
+
+class FleetDispatchRouteAttempt(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        UPDATED = "UPDATED", "Updated"
+        FAILED = "FAILED", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_dispatch_route_attempts")
+    plan = models.ForeignKey(FleetDispatchPlan, on_delete=models.CASCADE, related_name="route_attempts")
+    assignment_index = models.PositiveSmallIntegerField()
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING)
+    requested_at = models.DateTimeField(default=timezone.now)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    response_code = models.PositiveSmallIntegerField(null=True, blank=True)
+    duration_ms = models.PositiveIntegerField(null=True, blank=True)
+    distance_m = models.PositiveIntegerField(null=True, blank=True)
+    duration_seconds = models.PositiveIntegerField(null=True, blank=True)
+    error_code = models.CharField(max_length=32, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["plan", "assignment_index"], name="uniq_dispatch_route_attempt")]
+        indexes = [models.Index(fields=["tenant", "requested_at"]), models.Index(fields=["tenant", "status", "requested_at"])]
+
+
 class ReturnLoadOffer(models.Model):
     class Status(models.TextChoices):
         OFFERED = "OFFERED", "Offer recorded"
@@ -435,7 +597,8 @@ class FleetTripLocation(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_trip_locations")
     trip = models.OneToOneField(FleetTrip, on_delete=models.CASCADE, related_name="latest_phone_location")
-    reported_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name="fleet_trip_locations_reported")
+    reported_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.PROTECT, related_name="fleet_trip_locations_reported")
+    source_provider = models.CharField(max_length=32, default="PHONE")
     latitude = models.DecimalField(max_digits=9, decimal_places=6)
     longitude = models.DecimalField(max_digits=9, decimal_places=6)
     accuracy_m = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -452,6 +615,275 @@ class FleetTripLocation(models.Model):
             models.CheckConstraint(condition=models.Q(longitude__gte=-180, longitude__lte=180), name="fleet_location_longitude_range"),
         ]
         indexes = [models.Index(fields=["tenant", "captured_at"])]
+
+
+class FleetTripLocationSample(models.Model):
+    """Append-only GPS history used for trip playback and audit."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_trip_location_samples")
+    trip = models.ForeignKey(FleetTrip, on_delete=models.CASCADE, related_name="location_samples")
+    reported_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.PROTECT, related_name="fleet_trip_location_samples")
+    source_provider = models.CharField(max_length=32, default="PHONE")
+    latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    accuracy_m = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    speed_kmh = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    heading_degrees = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    captured_at = models.DateTimeField()
+    received_at = models.DateTimeField(auto_now_add=True)
+    client_event_id = models.UUIDField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "client_event_id"], name="uniq_fleet_location_sample_event"),
+            models.CheckConstraint(condition=models.Q(latitude__gte=-90, latitude__lte=90), name="fleet_sample_latitude_range"),
+            models.CheckConstraint(condition=models.Q(longitude__gte=-180, longitude__lte=180), name="fleet_sample_longitude_range"),
+        ]
+        indexes = [models.Index(fields=["tenant", "trip", "captured_at"]) ]
+
+
+class FleetGpsDevice(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_gps_devices")
+    provider = models.CharField(max_length=32)
+    device_id = models.CharField(max_length=128)
+    vehicle = models.ForeignKey(FleetVehicle, on_delete=models.PROTECT, related_name="gps_devices")
+    active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="fleet_gps_devices_created")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["provider", "device_id"], name="uniq_fleet_gps_provider_device")]
+        indexes = [models.Index(fields=["tenant", "active", "provider"])]
+
+
+class FleetGeofence(models.Model):
+    class SiteType(models.TextChoices):
+        FACTORY = "FACTORY", "Factory"
+        WAREHOUSE = "WAREHOUSE", "Warehouse"
+        CUSTOMER = "CUSTOMER", "Customer"
+        OTHER = "OTHER", "Other"
+
+    class Shape(models.TextChoices):
+        CIRCLE = "CIRCLE", "Circle"
+        POLYGON = "POLYGON", "Polygon"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_geofences")
+    name = models.CharField(max_length=160)
+    site_type = models.CharField(max_length=16, choices=SiteType.choices, default=SiteType.OTHER)
+    active = models.BooleanField(default=True)
+    current_version = models.PositiveIntegerField(default=1)
+    dwell_alert_minutes = models.PositiveSmallIntegerField(default=60, help_text="Raise a review case after this many minutes inside; zero disables dwell alerts.")
+    created_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name="fleet_geofences_created")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "name"], name="uniq_fleet_geofence_name")]
+        indexes = [models.Index(fields=["tenant", "active", "site_type"])]
+
+
+class FleetGeofenceVersion(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    geofence = models.ForeignKey(FleetGeofence, on_delete=models.CASCADE, related_name="versions")
+    version = models.PositiveIntegerField()
+    shape = models.CharField(max_length=12, choices=FleetGeofence.Shape.choices)
+    geometry = models.JSONField()
+    reason = models.CharField(max_length=300, blank=True)
+    created_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name="fleet_geofence_versions_created")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["geofence", "version"], name="uniq_fleet_geofence_version")]
+        ordering = ["geofence_id", "-version"]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValueError("Geofence versions are immutable; create a new version instead.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Geofence versions are immutable.")
+
+
+class FleetGeofenceTripState(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_geofence_trip_states")
+    trip = models.ForeignKey(FleetTrip, on_delete=models.CASCADE, related_name="geofence_states")
+    geofence = models.ForeignKey(FleetGeofence, on_delete=models.CASCADE, related_name="trip_states")
+    version = models.PositiveIntegerField()
+    inside = models.BooleanField(null=True, blank=True)
+    candidate_inside = models.BooleanField(null=True, blank=True)
+    candidate_count = models.PositiveSmallIntegerField(default=0)
+    candidate_since = models.DateTimeField(null=True, blank=True)
+    last_sample_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "trip", "geofence"], name="uniq_fleet_geofence_trip_state")]
+        indexes = [models.Index(fields=["tenant", "trip", "updated_at"])]
+
+
+class FleetGeofenceEvent(models.Model):
+    class EventType(models.TextChoices):
+        ARRIVAL = "ARRIVAL", "Arrival"
+        DEPARTURE = "DEPARTURE", "Departure"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_geofence_events")
+    trip = models.ForeignKey(FleetTrip, on_delete=models.CASCADE, related_name="geofence_events")
+    geofence = models.ForeignKey(FleetGeofence, on_delete=models.PROTECT, related_name="events")
+    version = models.PositiveIntegerField()
+    source_sample = models.ForeignKey(FleetTripLocationSample, on_delete=models.PROTECT, related_name="geofence_events")
+    event_type = models.CharField(max_length=12, choices=EventType.choices)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    occurred_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "geofence", "source_sample"], name="uniq_fleet_geofence_event_sample")]
+        indexes = [models.Index(fields=["tenant", "occurred_at"]), models.Index(fields=["tenant", "trip", "occurred_at"])]
+
+
+class FleetStopEpisode(models.Model):
+    class Status(models.TextChoices):
+        OPEN = "OPEN", "Open"
+        CLOSED = "CLOSED", "Closed"
+        INTERRUPTED = "INTERRUPTED", "Interrupted by GPS gap"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_stop_episodes")
+    trip = models.ForeignKey(FleetTrip, on_delete=models.CASCADE, related_name="stop_episodes")
+    inside_geofence = models.ForeignKey(FleetGeofence, null=True, blank=True, on_delete=models.SET_NULL, related_name="stop_episodes")
+    started_at = models.DateTimeField()
+    last_sample_at = models.DateTimeField()
+    ended_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN)
+    sample_count = models.PositiveIntegerField(default=1)
+    start_latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    start_longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    last_latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    last_longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    exception_case = models.ForeignKey("fleet.FleetExceptionCase", null=True, blank=True, on_delete=models.SET_NULL, related_name="stop_episodes")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "trip"], condition=models.Q(ended_at__isnull=True), name="uniq_open_fleet_stop_episode")]
+        indexes = [models.Index(fields=["tenant", "started_at"]), models.Index(fields=["tenant", "trip", "status"])]
+
+
+class FleetGeofenceDwellEpisode(models.Model):
+    class EndReason(models.TextChoices):
+        DEPARTURE = "DEPARTURE", "Departure"
+        GPS_GAP = "GPS_GAP", "GPS gap"
+        BOUNDARY_CHANGED = "BOUNDARY_CHANGED", "Boundary changed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_geofence_dwell_episodes")
+    trip = models.ForeignKey(FleetTrip, on_delete=models.CASCADE, related_name="geofence_dwell_episodes")
+    geofence = models.ForeignKey(FleetGeofence, on_delete=models.PROTECT, related_name="dwell_episodes")
+    version = models.PositiveIntegerField()
+    started_at = models.DateTimeField()
+    last_sample_at = models.DateTimeField()
+    ended_at = models.DateTimeField(null=True, blank=True)
+    end_reason = models.CharField(max_length=24, choices=EndReason.choices, blank=True)
+    sample_count = models.PositiveIntegerField(default=1)
+    last_latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    last_longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    exception_case = models.ForeignKey("fleet.FleetExceptionCase", null=True, blank=True, on_delete=models.SET_NULL, related_name="geofence_dwell_episodes")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "trip", "geofence"], condition=models.Q(ended_at__isnull=True), name="uniq_open_fleet_geofence_dwell")]
+        indexes = [models.Index(fields=["tenant", "started_at"]), models.Index(fields=["tenant", "trip", "geofence", "ended_at"])]
+
+
+class FleetRouteProviderAttempt(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        UPDATED = "UPDATED", "Updated"
+        FAILED = "FAILED", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_route_provider_attempts")
+    trip = models.ForeignKey(FleetTrip, on_delete=models.CASCADE, related_name="route_provider_attempts")
+    provider = models.CharField(max_length=32, default="GOOGLE_ROUTES")
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING)
+    requested_at = models.DateTimeField(default=timezone.now)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    response_code = models.PositiveSmallIntegerField(null=True, blank=True)
+    duration_ms = models.PositiveIntegerField(null=True, blank=True)
+    eta_at = models.DateTimeField(null=True, blank=True)
+    distance_m = models.PositiveIntegerField(null=True, blank=True)
+    error_code = models.CharField(max_length=32, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["tenant", "requested_at"]), models.Index(fields=["tenant", "trip", "requested_at"]), models.Index(fields=["tenant", "status", "requested_at"])]
+
+
+class FleetRouteSnapshot(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_route_snapshots")
+    trip = models.ForeignKey(FleetTrip, on_delete=models.CASCADE, related_name="route_snapshots")
+    version = models.PositiveIntegerField()
+    provider = models.CharField(max_length=32, default="GOOGLE_ROUTES")
+    route_fingerprint = models.CharField(max_length=64)
+    route_path = models.JSONField()
+    distance_m = models.PositiveIntegerField()
+    duration_seconds = models.PositiveIntegerField()
+    destination = models.CharField(max_length=240)
+    generated_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["trip", "version"], name="uniq_fleet_route_snapshot_version"),
+            models.UniqueConstraint(fields=["trip", "route_fingerprint"], name="uniq_fleet_route_snapshot_fingerprint"),
+        ]
+        indexes = [models.Index(fields=["tenant", "trip", "version"])]
+
+
+class FleetRouteDeviationEpisode(models.Model):
+    class Status(models.TextChoices):
+        CANDIDATE = "CANDIDATE", "Candidate"
+        ACTIVE = "ACTIVE", "Confirmed deviation"
+        CLOSED = "CLOSED", "Rejoined route"
+        INTERRUPTED = "INTERRUPTED", "Interrupted by GPS gap"
+        EXEMPTED = "EXEMPTED", "Planned site stop"
+        SUPERSEDED = "SUPERSEDED", "Route plan changed"
+
+    class EndReason(models.TextChoices):
+        REJOINED = "REJOINED", "Rejoined route"
+        GPS_GAP = "GPS_GAP", "GPS gap"
+        PLANNED_SITE = "PLANNED_SITE", "Inside planned site"
+        ROUTE_UPDATED = "ROUTE_UPDATED", "Route updated"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_route_deviation_episodes")
+    trip = models.ForeignKey(FleetTrip, on_delete=models.CASCADE, related_name="route_deviation_episodes")
+    route_snapshot = models.ForeignKey(FleetRouteSnapshot, on_delete=models.PROTECT, related_name="deviation_episodes")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.CANDIDATE)
+    end_reason = models.CharField(max_length=20, choices=EndReason.choices, blank=True)
+    threshold_m = models.PositiveIntegerField(default=2000)
+    candidate_since = models.DateTimeField()
+    started_at = models.DateTimeField(null=True, blank=True)
+    last_sample_at = models.DateTimeField()
+    ended_at = models.DateTimeField(null=True, blank=True)
+    candidate_count = models.PositiveSmallIntegerField(default=1)
+    sample_count = models.PositiveIntegerField(default=1)
+    max_deviation_m = models.PositiveIntegerField(default=0)
+    last_deviation_m = models.PositiveIntegerField(default=0)
+    first_latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    first_longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    last_latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    last_longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    exception_case = models.ForeignKey("fleet.FleetExceptionCase", null=True, blank=True, on_delete=models.SET_NULL, related_name="route_deviation_episodes")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "trip"], condition=models.Q(status__in=["CANDIDATE", "ACTIVE"]), name="uniq_open_fleet_route_deviation")]
+        indexes = [models.Index(fields=["tenant", "trip", "status"]), models.Index(fields=["tenant", "candidate_since"])]
 
 
 class TripRevenueLine(models.Model):
@@ -782,7 +1214,7 @@ class TransportInvoice(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="transport_invoices")
     customer = models.ForeignKey(FleetCustomer, on_delete=models.PROTECT, related_name="transport_invoices")
     order = models.OneToOneField(TransportOrder, on_delete=models.PROTECT, related_name="customer_invoice")
-    trip = models.OneToOneField(FleetTrip, on_delete=models.PROTECT, related_name="customer_invoice")
+    trip = models.ForeignKey(FleetTrip, on_delete=models.PROTECT, related_name="customer_invoices")
     invoice_number = models.CharField(max_length=64)
     invoice_date = models.DateField(default=timezone.localdate)
     due_date = models.DateField(null=True, blank=True)

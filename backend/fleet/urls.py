@@ -1,17 +1,31 @@
 from django.urls import path
 from .exceptions import FleetExceptions, FleetExceptionDetail
-from .routing import RouteIntegration
+from .routing import RouteEtaHistory, RouteIntegration
 from .shipment_portal import ShipmentLinks, PublicShipment
 from .customer_notifications import CustomerNotificationStatus, WhatsAppDeliveryWebhook
 from .operations import DockDetentionAction, MaintenanceReliability, MaintenanceReturnToService, ReturnLoadHistory, ReturnLoadCancel
+from .geofence_views import FleetGeofenceDetail, FleetGeofenceEvents, FleetGeofences
+from .gps_providers import FleetGpsDeviceDetail, FleetGpsDevices, FleetGpsProviderIntake
+from .dispatch import FleetDispatchRecommendations
+from .dispatch_planning import FleetDispatchPlanOptimize, FleetDispatchPlanConfirm, FleetDriverSchedules, FleetDriverScheduleDetail, FleetTripStopAction
 
-from .views import DockAppointmentAction, DockAppointments, DriverAdvances, DriverAdvanceRecoveries, DriverLedgerExport, DriverPayPolicies, DriverPayPolicyDetail, DriverSalaryAdjustments, DriverSalaryAdjustmentReview, DriverSalaries, DriverSalaryDetail, DriverSalaryPayments, DriverSalaryReview, DriverTripEarnings, DriverTripLocation, FleetAlerts, FleetCustomers, FleetCustomerDetail, FleetDashboard, FleetDirectory, FleetDirectoryDetail, FleetDocumentUpload, FleetDocks, FleetFollowUps, FleetLiveLocations, FleetLogisticsDocuments, FleetMaintenance, FleetOperationalReports, FleetRevenueLeakage, FleetVehicleDocumentDownload, FleetVehicleDocuments, FreightImportRowAction, FreightImports, FleetReminderSettings, FleetTripReport, MyDriverTrips, ReturnLoadOfferAction, ReturnLoadSuggestions, TransportInvoices, TransportInvoiceCollections, TransportInvoiceIssue, TransportOrders, TripAction, TripCollection, TripDetail, TripLines
+from .views import DockAppointmentAction, DockAppointments, DriverAdvances, DriverAdvanceRecoveries, DriverLedgerExport, DriverPayPolicies, DriverPayPolicyDetail, DriverSalaryAdjustments, DriverSalaryAdjustmentReview, DriverSalaries, DriverSalaryDetail, DriverSalaryPayments, DriverSalaryReview, DriverTripEarnings, DriverTripLocation, FleetAlerts, FleetCustomers, FleetCustomerDetail, FleetDashboard, FleetDirectory, FleetDirectoryDetail, FleetDocumentUpload, FleetDocks, FleetFollowUps, FleetLiveLocations, FleetTripLocationHistory, FleetLogisticsDocuments, FleetMaintenance, FleetOperationalReports, FleetRevenueLeakage, FleetVehicleDocumentDownload, FleetVehicleDocuments, FreightImportRowAction, FreightImports, FleetReminderSettings, FleetTripReport, MyDriverTrips, ReturnLoadOfferAction, ReturnLoadSuggestions, TransportInvoices, TransportInvoiceIssue, TransportInvoiceCollections, TransportOrders, TripAction, TripCollection, TripDetail, TripLines
 
 urlpatterns = [
     path("public/whatsapp-status", WhatsAppDeliveryWebhook.as_view()),
     path("customer-notifications", CustomerNotificationStatus.as_view()),
     path("route-integration", RouteIntegration.as_view()),
+    path("dispatch-recommendations", FleetDispatchRecommendations.as_view()),
+    path("dispatch-plans/optimize", FleetDispatchPlanOptimize.as_view()),
+    path("dispatch-plans/<uuid:plan_id>/confirm", FleetDispatchPlanConfirm.as_view()),
+    path("driver-schedules", FleetDriverSchedules.as_view()),
+    path("driver-schedules/<uuid:schedule_id>", FleetDriverScheduleDetail.as_view()),
+    path("trips/<uuid:trip_id>/stops/<uuid:stop_id>/<str:action>", FleetTripStopAction.as_view()),
+    path("gps-devices", FleetGpsDevices.as_view()),
+    path("gps-devices/<uuid:device_id>", FleetGpsDeviceDetail.as_view()),
+    path("gps-provider/events", FleetGpsProviderIntake.as_view()),
     path("trips/<uuid:trip_id>/refresh-route", RouteIntegration.as_view()),
+    path("trips/<uuid:trip_id>/eta-history", RouteEtaHistory.as_view()),
     path("shipment-links", ShipmentLinks.as_view()),
     path("public/shipment/<str:token>", PublicShipment.as_view()),
     path("public/shipment/<str:token>/<str:download>", PublicShipment.as_view()),
@@ -52,6 +66,10 @@ urlpatterns = [
     path("live-locations", FleetLiveLocations.as_view()),
     path("trips/<uuid:trip_id>", TripDetail.as_view()),
     path("trips/<uuid:trip_id>/location", DriverTripLocation.as_view()),
+    path("trips/<uuid:trip_id>/location-history", FleetTripLocationHistory.as_view()),
+    path("geofences", FleetGeofences.as_view()),
+    path("geofences/<uuid:geofence_id>", FleetGeofenceDetail.as_view()),
+    path("geofence-events", FleetGeofenceEvents.as_view()),
     path("trips/<uuid:trip_id>/start", TripAction.as_view(), {"action": "start"}),
     path("trips/<uuid:trip_id>/load", TripAction.as_view(), {"action": "load"}),
     path("trips/<uuid:trip_id>/complete", TripAction.as_view(), {"action": "complete"}),

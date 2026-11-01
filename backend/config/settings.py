@@ -71,6 +71,7 @@ CELERY_BEAT_SCHEDULE = {
     "fleet-exception-monitor": {"task": "fleet.tasks.maintain_fleet_exceptions", "schedule": 300.0},
     "fleet-google-route-monitor": {"task": "fleet.tasks.refresh_fleet_routes", "schedule": 300.0},
     "fleet-customer-notices": {"task": "fleet.tasks.maintain_customer_notices", "schedule": 60.0},
+    "fleet-location-history-retention": {"task": "fleet.tasks.prune_fleet_location_history", "schedule": crontab(minute=35, hour=2)},
 }
 STATIC_URL = "static/"
 MEDIA_ROOT = BASE_DIR / "media"
@@ -132,3 +133,4 @@ RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
 RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
 RAZORPAY_API_BASE_URL = os.getenv("RAZORPAY_API_BASE_URL", "https://api.razorpay.com/v1")
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {"vendor_portal": "60/hour", "gmail_oauth_callback": "60/hour", "google_signin_start": "60/hour", "google_signin_callback": "60/hour", "admin_login": "10/hour", "password_reset": "5/hour"}
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["admin_mfa"] = "30/hour"

@@ -127,7 +127,9 @@ def test_refund_intent_history_is_admin_only_and_replay_is_read_only(records, se
     client = APIClient(); client.force_authenticate(user)
     url = f"/api/v1/admin/payments/{payment.pk}/refund"
     assert client.get(url).status_code == 403
-    AdminStaff.objects.create(user=user, role="BILLING_ADMIN")
+    staff = AdminStaff.objects.create(user=user, role="BILLING_ADMIN")
+    from .test_helpers import authenticate_staff
+    authenticate_staff(client, staff)
     settings.RAZORPAY_KEY_ID = "synthetic"
     settings.RAZORPAY_KEY_SECRET = "synthetic"
     key = str(uuid.uuid4())

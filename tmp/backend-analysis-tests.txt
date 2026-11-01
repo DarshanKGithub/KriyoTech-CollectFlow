@@ -1,0 +1,166 @@
+.FFFFFFF.F......F...FFF...FFFF....F........F............................ [ 28%]
+........................................................................ [ 57%]
+..........................................................F..F.......... [ 86%]
+....................sssssss.ss...                                        [100%]
+================================== FAILURES ===================================
+__ CompanyCheckoutTests.test_bad_signature_and_wrong_amount_cannot_activate ___
+admin_console\test_company_checkout.py:78: in test_bad_signature_and_wrong_amount_cannot_activate
+    self.create_order()
+admin_console\test_company_checkout.py:31: in create_order
+    self.assertEqual(response.status_code, 201, response.data)
+E   AssertionError: 403 != 201 : {'detail': ErrorDetail(string='Super Admin access requires MFA. Sign in again and complete two-factor authentication.', code='permission_denied')}
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/companies/295743b7-b123-43fe-8a4f-ef2d8dd4509b/checkout
+_ CompanyCheckoutTests.test_collect_now_creates_onboarding_subscription_without_trial _
+admin_console\test_company_checkout.py:110: in test_collect_now_creates_onboarding_subscription_without_trial
+    self.assertEqual(response.status_code, 201, response.data)
+E   AssertionError: 403 != 201 : {'detail': ErrorDetail(string='Super Admin access requires MFA. Sign in again and complete two-factor authentication.', code='permission_denied')}
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/companies
+_ CompanyCheckoutTests.test_gateway_failure_keeps_company_and_creates_no_payment _
+admin_console\test_company_checkout.py:104: in test_gateway_failure_keeps_company_and_creates_no_payment
+    self.assertEqual(response.status_code, 502)
+E   AssertionError: 403 != 502
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/companies/624f0c6c-a56e-41d6-bb39-7ab3c7957af4/checkout
+_ CompanyCheckoutTests.test_missing_gateway_configuration_rejects_before_company_creation _
+admin_console\test_company_checkout.py:117: in test_missing_gateway_configuration_rejects_before_company_creation
+    self.assertEqual(response.status_code, 503)
+E   AssertionError: 403 != 503
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/companies
+___ CompanyCheckoutTests.test_order_cannot_be_verified_for_another_company ____
+admin_console\test_company_checkout.py:89: in test_order_cannot_be_verified_for_another_company
+    self.create_order()
+admin_console\test_company_checkout.py:31: in create_order
+    self.assertEqual(response.status_code, 201, response.data)
+E   AssertionError: 403 != 201 : {'detail': ErrorDetail(string='Super Admin access requires MFA. Sign in again and complete two-factor authentication.', code='permission_denied')}
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/companies/b1419ffe-a68e-4c34-a9d0-fb24e357b24e/checkout
+_ CompanyCheckoutTests.test_order_uses_server_price_and_repeated_click_reuses_pending_order _
+admin_console\test_company_checkout.py:38: in test_order_uses_server_price_and_repeated_click_reuses_pending_order
+    payment = self.create_order()
+              ^^^^^^^^^^^^^^^^^^^
+admin_console\test_company_checkout.py:31: in create_order
+    self.assertEqual(response.status_code, 201, response.data)
+E   AssertionError: 403 != 201 : {'detail': ErrorDetail(string='Super Admin access requires MFA. Sign in again and complete two-factor authentication.', code='permission_denied')}
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/companies/e0a6c741-d4c2-4efc-9afc-5bdb33d81321/checkout
+__ CompanyCheckoutTests.test_renewal_date_and_duplicate_activation_are_safe ___
+admin_console\test_company_checkout.py:121: in test_renewal_date_and_duplicate_activation_are_safe
+    payment = self.create_order()
+              ^^^^^^^^^^^^^^^^^^^
+admin_console\test_company_checkout.py:31: in create_order
+    self.assertEqual(response.status_code, 201, response.data)
+E   AssertionError: 403 != 201 : {'detail': ErrorDetail(string='Super Admin access requires MFA. Sign in again and complete two-factor authentication.', code='permission_denied')}
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/companies/e2750993-8020-4824-8ea0-70c0da298e64/checkout
+____ CompanyCheckoutTests.test_verify_and_later_webhook_activate_only_once ____
+admin_console\test_company_checkout.py:50: in test_verify_and_later_webhook_activate_only_once
+    payment = self.create_order()
+              ^^^^^^^^^^^^^^^^^^^
+admin_console\test_company_checkout.py:31: in create_order
+    self.assertEqual(response.status_code, 201, response.data)
+E   AssertionError: 403 != 201 : {'detail': ErrorDetail(string='Super Admin access requires MFA. Sign in again and complete two-factor authentication.', code='permission_denied')}
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/companies/3ea8907b-d7d3-4387-8552-6917140a6b8a/checkout
+______ test_refund_intent_history_is_admin_only_and_replay_is_read_only _______
+admin_console\test_foundation.py:136: in test_refund_intent_history_is_admin_only_and_replay_is_read_only
+    assert client.post(url, data, format="json").data["status"] == "UNKNOWN"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'status'
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/payments/8299654d-c7f8-466e-b49b-c53bdebc1574/refund
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/payments/8299654d-c7f8-466e-b49b-c53bdebc1574/refund
+_ AdminConsoleTests.test_admin_can_change_own_password_with_current_password __
+admin_console\tests.py:71: in test_admin_can_change_own_password_with_current_password
+    self.assertEqual(response.status_code, 200, response.data)
+E   AssertionError: 403 != 200 : {'detail': ErrorDetail(string='Super Admin access requires MFA. Sign in again and complete two-factor authentication.', code='permission_denied')}
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/auth/change-password
+______ AdminConsoleTests.test_admin_mfa_setup_and_verification_lifecycle ______
+admin_console\tests.py:425: in test_admin_mfa_setup_and_verification_lifecycle
+    self.assertTrue(verify_resp.data.get("mfa_verified"))
+E   AssertionError: None is not true
+_ AdminConsoleTests.test_admin_refund_is_requested_server_side_and_waits_for_webhook _
+admin_console\tests.py:379: in test_admin_refund_is_requested_server_side_and_waits_for_webhook
+    self.assertEqual(response.status_code, 201, response.data)
+E   AssertionError: 403 != 201 : {'detail': ErrorDetail(string='Super Admin access requires MFA. Sign in again and complete two-factor authentication.', code='permission_denied')}
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/payments/248c0563-5e34-42c4-b48f-f1794c31c986/refund
+__ AdminConsoleTests.test_company_delete_revokes_access_and_retains_records ___
+admin_console\tests.py:81: in test_company_delete_revokes_access_and_retains_records
+    self.assertEqual(response.status_code, 200, response.data)
+E   AssertionError: 403 != 200 : {'detail': ErrorDetail(string='Super Admin access requires MFA. Sign in again and complete two-factor authentication.', code='permission_denied')}
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/companies/30c33465-9fc2-462e-b9e5-150c6e9092de
+_ AdminConsoleTests.test_company_onboarding_creates_owner_invitation_subscription_and_audit _
+admin_console\tests.py:102: in test_company_onboarding_creates_owner_invitation_subscription_and_audit
+    self.assertEqual(response.status_code, 201, response.data)
+E   AssertionError: 403 != 201 : {'detail': ErrorDetail(string='Super Admin access requires MFA. Sign in again and complete two-factor authentication.', code='permission_denied')}
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/companies
+_ AdminConsoleTests.test_entitlement_override_is_audited_and_takes_precedence _
+admin_console\tests.py:140: in test_entitlement_override_is_audited_and_takes_precedence
+    self.assertEqual(response.status_code, 200, response.data)
+E   AssertionError: 403 != 200 : {'detail': ErrorDetail(string='Super Admin access requires MFA. Sign in again and complete two-factor authentication.', code='permission_denied')}
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/companies/edfff05c-8632-4ad6-a824-eb5c2ac4011c/entitlements
+_ AdminConsoleTests.test_fleet_and_trips_is_configurable_as_plan_and_company_entitlement _
+admin_console\tests.py:195: in test_fleet_and_trips_is_configurable_as_plan_and_company_entitlement
+    self.assertIn("Fleet & Trips", [row["name"] for row in catalog.data["features"]])
+                                                           ^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'features'
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/features
+_ AdminConsoleTests.test_offline_bank_payment_records_receipt_and_activates_plan _
+admin_console\tests.py:362: in test_offline_bank_payment_records_receipt_and_activates_plan
+    self.assertEqual(response.status_code, 201, response.data)
+E   AssertionError: 403 != 201 : {'detail': ErrorDetail(string='Super Admin access requires MFA. Sign in again and complete two-factor authentication.', code='permission_denied')}
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/payments/offline
+______ AdminConsoleTests.test_super_admin_can_create_another_super_admin ______
+admin_console\tests.py:63: in test_super_admin_can_create_another_super_admin
+    self.assertEqual(response.status_code, 201, response.data)
+E   AssertionError: 403 != 201 : {'detail': ErrorDetail(string='Super Admin access requires MFA. Sign in again and complete two-factor authentication.', code='permission_denied')}
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/staff/super-admins
+_______________ test_platform_and_tenant_scopes_cannot_be_mixed _______________
+settlements\tests.py:61: in test_platform_and_tenant_scopes_cannot_be_mixed
+    assert {item["id"] for item in s["admin"].get("/api/v1/admin/settlements/accounts").data["accounts"]} == {str(s["platform"].pk)}
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'accounts'
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/settlements/accounts
+WARNING  django.request:log.py:253 Forbidden: /api/v1/settlements/accounts
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/settlements/accounts
+________ test_staged_approval_idempotency_and_protected_original[True] ________
+settlements\tests.py:84: in test_staged_approval_idempotency_and_protected_original
+    assert first.status_code == 201, first.data
+E   AssertionError: {'detail': ErrorDetail(string='Super Admin access requires MFA. Sign in again and complete two-factor authentication.', code='permission_denied')}
+E   assert 403 == 201
+E    +  where 403 = <Response status_code=403, "application/json">.status_code
+------------------------------ Captured log call ------------------------------
+WARNING  django.request:log.py:253 Forbidden: /api/v1/admin/settlements/imports
+=========================== short test summary info ===========================
+FAILED admin_console/test_company_checkout.py::CompanyCheckoutTests::test_bad_signature_and_wrong_amount_cannot_activate
+FAILED admin_console/test_company_checkout.py::CompanyCheckoutTests::test_collect_now_creates_onboarding_subscription_without_trial
+FAILED admin_console/test_company_checkout.py::CompanyCheckoutTests::test_gateway_failure_keeps_company_and_creates_no_payment
+FAILED admin_console/test_company_checkout.py::CompanyCheckoutTests::test_missing_gateway_configuration_rejects_before_company_creation
+FAILED admin_console/test_company_checkout.py::CompanyCheckoutTests::test_order_cannot_be_verified_for_another_company
+FAILED admin_console/test_company_checkout.py::CompanyCheckoutTests::test_order_uses_server_price_and_repeated_click_reuses_pending_order
+FAILED admin_console/test_company_checkout.py::CompanyCheckoutTests::test_renewal_date_and_duplicate_activation_are_safe
+FAILED admin_console/test_company_checkout.py::CompanyCheckoutTests::test_verify_and_later_webhook_activate_only_once
+FAILED admin_console/test_foundation.py::test_refund_intent_history_is_admin_only_and_replay_is_read_only
+FAILED admin_console/tests.py::AdminConsoleTests::test_admin_can_change_own_password_with_current_password
+FAILED admin_console/tests.py::AdminConsoleTests::test_admin_mfa_setup_and_verification_lifecycle
+FAILED admin_console/tests.py::AdminConsoleTests::test_admin_refund_is_requested_server_side_and_waits_for_webhook
+FAILED admin_console/tests.py::AdminConsoleTests::test_company_delete_revokes_access_and_retains_records
+FAILED admin_console/tests.py::AdminConsoleTests::test_company_onboarding_creates_owner_invitation_subscription_and_audit
+FAILED admin_console/tests.py::AdminConsoleTests::test_entitlement_override_is_audited_and_takes_precedence
+FAILED admin_console/tests.py::AdminConsoleTests::test_fleet_and_trips_is_configurable_as_plan_and_company_entitlement
+FAILED admin_console/tests.py::AdminConsoleTests::test_offline_bank_payment_records_receipt_and_activates_plan
+FAILED admin_console/tests.py::AdminConsoleTests::test_super_admin_can_create_another_super_admin
+FAILED settlements/tests.py::test_platform_and_tenant_scopes_cannot_be_mixed
+FAILED settlements/tests.py::test_staged_approval_idempotency_and_protected_original[True]
+20 failed, 220 passed, 9 skipped in 221.60s (0:03:41)

@@ -16,6 +16,7 @@ def build_bank_reconciliation_suggestions(statement_id=None):
     from audit.models import AuditLog
     from .models import BankTransaction
     from . import reconciliation
+    from accounts.workspace_access import workspace_is_operational
 
     rows = BankTransaction.objects.filter(status=BankTransaction.Status.UNMATCHED,
         statement__source_account__isnull=False).select_related("tenant", "statement__source_account")
@@ -23,6 +24,9 @@ def build_bank_reconciliation_suggestions(statement_id=None):
         rows = rows.filter(statement_id=statement_id)
     matched = suggested = skipped = 0
     for row in rows.order_by("created_at", "id").iterator(chunk_size=100):
+        if not workspace_is_operational(row.tenant):
+            skipped += 1
+            continue
         try:
             result = reconciliation.suggestions(row.tenant, row.pk)
             candidates = result.get("suggestions", [])
@@ -68,6 +72,7 @@ def build_bank_reconciliation_suggestions(statement_id=None):
 def sync_gmail_mailboxes():
     """Poll connected workspaces through the same idempotent sync path as manual sync."""
     from accounts.models import Membership
+    from accounts.workspace_access import workspace_is_operational
     from admin_console.services import has_feature
     from notifications.models import Notification
     from .models import GmailConnection
@@ -78,7 +83,7 @@ def sync_gmail_mailboxes():
     client = redis.Redis.from_url(settings.CELERY_BROKER_URL, socket_connect_timeout=3, socket_timeout=3)
     for connection in GmailConnection.objects.filter(active=True).select_related("tenant", "connected_by"):
         tenant = connection.tenant
-        if tenant.is_deleted or not has_feature(tenant, "email_invoice_intake"):
+        if not workspace_is_operational(tenant) or not has_feature(tenant, "email_invoice_intake"):
             continue
         membership = Membership.objects.filter(tenant=tenant, is_active=True, user__is_active=True,
             role__in=[Membership.Role.OWNER, Membership.Role.FINANCE]).select_related("user").order_by("id").first()
@@ -123,10 +128,13 @@ def send_daily_operations_digest():
     from notifications.models import Notification, NotificationPreference
     from tenants.models import Tenant
     from django.utils import timezone
+    from accounts.workspace_access import workspace_is_operational
 
     today = timezone.localdate()
     created = 0
     for tenant in Tenant.objects.filter(is_deleted=False).iterator(chunk_size=100):
+        if not workspace_is_operational(tenant):
+            continue
         counts = {
             "invoice_review": Invoice.objects.filter(tenant=tenant, status__in=["REVIEW_REQUIRED", "EXTRACTION_FAILED", "EXCEPTION"]).count(),
             "approvals": Invoice.objects.filter(tenant=tenant, status="APPROVAL_PENDING").count(),

@@ -11,8 +11,15 @@ HEADERS = ["Voucher Type", "Invoice Number", "Invoice Date", "Vendor Ledger", "P
 
 @transaction.atomic
 def create_tally_csv(tenant, invoices, actor):
-    invoices = list(invoices)
-    if not invoices: raise ValidationError("Select at least one invoice")
+    selected = list(invoices)
+    if not selected: raise ValidationError("Select at least one invoice")
+    selected_ids = {invoice.pk for invoice in selected}
+    # Re-read and lock current rows so concurrent edits/exports cannot act on stale states.
+    invoices = list(Invoice.objects.select_for_update(of=("self",)).select_related("vendor").filter(
+        tenant=tenant, pk__in=selected_ids
+    ).order_by("pk"))
+    if len(invoices) != len(selected_ids):
+        raise ValidationError("One or more selected invoices are no longer available in this workspace")
     for invoice in invoices:
         if invoice.tenant_id != tenant.id or invoice.status != Invoice.Status.PAYMENT_READY: raise ValidationError("Only payment-ready invoices from this workspace can be exported")
         if invoice.exceptions.filter(blocking=True).exclude(status__in=["RESOLVED", "OVERRIDDEN"]).exists(): raise ValidationError(f"Invoice {invoice.invoice_number} has an open blocking exception")

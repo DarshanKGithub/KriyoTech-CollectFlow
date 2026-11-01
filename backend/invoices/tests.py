@@ -1,7 +1,11 @@
 from decimal import Decimal
+from datetime import timedelta
+import hashlib
 import pytest
+from django.core.exceptions import ValidationError
+from django.utils import timezone
 from tenants.models import Tenant
-from accounts.models import User, Membership
+from accounts.models import User, Membership, Invitation
 from invoices.models import Invoice
 from vendors.models import Vendor
 from exports_app.services import create_tally_csv
@@ -21,6 +25,9 @@ def test_tenant_membership_and_export_state():
     assert invoice.status == Invoice.Status.EXPORTED
     assert job.debit_total == job.credit_total == Decimal("100")
     assert "Voucher Type,Invoice Number" in body
+    stale_invoice = Invoice.objects.get(pk=invoice.pk)
+    with pytest.raises(ValidationError):
+        create_tally_csv(tenant, [stale_invoice], user)
 
 @pytest.mark.django_db
 def test_invoice_list_is_scoped_to_authenticated_membership():
@@ -36,6 +43,28 @@ def test_invoice_list_is_scoped_to_authenticated_membership():
     assert [row["invoice_number"] for row in response.data["results"]] == ["VISIBLE"]
     denied = client.get("/api/v1/invoices/", HTTP_X_WORKSPACE="second")
     assert denied.status_code == 403
+
+@pytest.mark.django_db
+def test_last_active_owner_cannot_be_demoted():
+    tenant = Tenant.objects.create(name="Owners", workspace_key="owners")
+    owner = User.objects.create_user(username="owner-1@test", email="owner-1@test", password="example-pass")
+    Membership.objects.create(tenant=tenant, user=owner, role="OWNER")
+    client = APIClient(); client.force_authenticate(user=owner)
+    denied = client.patch(f"/api/v1/users/{owner.id}/role", {"role": "FINANCE"}, format="json", HTTP_X_WORKSPACE="owners")
+    assert denied.status_code == 409
+    assert Membership.objects.get(tenant=tenant, user=owner).role == "OWNER"
+
+    token = "existing-owner-role-change"
+    Invitation.objects.create(tenant=tenant, email=owner.email, role="FINANCE",
+        token_hash=hashlib.sha256(token.encode()).hexdigest(), expires_at=timezone.now()+timedelta(days=1))
+    invited = client.post("/api/v1/auth/accept-invitation", {"token": token, "password": "example-pass"}, format="json")
+    assert invited.status_code == 409
+    assert Membership.objects.get(tenant=tenant, user=owner).role == "OWNER"
+
+    second_owner = User.objects.create_user(username="owner-2@test", email="owner-2@test", password="example-pass")
+    Membership.objects.create(tenant=tenant, user=second_owner, role="OWNER")
+    allowed = client.patch(f"/api/v1/users/{owner.id}/role", {"role": "FINANCE"}, format="json", HTTP_X_WORKSPACE="owners")
+    assert allowed.status_code == 200
 
 @pytest.mark.django_db
 def test_auditor_can_read_but_cannot_create_invoice():

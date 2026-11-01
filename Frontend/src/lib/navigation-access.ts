@@ -52,6 +52,7 @@ const roles: Record<string, string[]> = {
   "/fleet/customer-notifications": ["OWNER", "FINANCE", "FLEET", "APPROVER"],
   "/fleet/reliability": ["OWNER", "FINANCE", "FLEET", "PURCHASE", "APPROVER"],
   "/fleet/live-tracking": ["OWNER", "FINANCE", "FLEET", "APPROVER"],
+  "/fleet/geofences": ["OWNER", "FLEET"],
 };
 
 export function canShowNavigation(href: string, access: NavigationAccess | null): boolean {

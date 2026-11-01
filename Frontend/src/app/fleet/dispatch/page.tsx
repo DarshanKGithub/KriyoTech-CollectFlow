@@ -64,6 +64,23 @@ type FollowUp = {
     due_at: string | null;
     status: string;
 };
+type DispatchVehicleSuggestion = {
+    vehicle_id: string;
+    registration_number: string;
+    vehicle_type: string;
+    capacity: string | null;
+    capacity_unit: string;
+    score: number;
+    score_basis: string;
+    reasons: string[];
+    warnings: string[];
+};
+type DispatchSuggestions = {
+    vehicles: DispatchVehicleSuggestion[];
+    drivers: { id: string; name: string }[];
+    excluded: Record<string, number>;
+    limitations: string[];
+};
 const input = "w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-forest";
 const lanes = [
     { id: "OPEN", title: "Needs dispatch", hint: "Order has no truck or driver" },
@@ -85,6 +102,8 @@ export default function FleetDispatchPage() {
     const [message, setMessage] = useState("");
     const [busy, setBusy] = useState("");
     const [exceptionTrip, setExceptionTrip] = useState("");
+    const [dispatchSuggestions, setDispatchSuggestions] = useState<Record<string, DispatchSuggestions>>({});
+    const [selectedResources, setSelectedResources] = useState<Record<string, { vehicleId: string; driverId: string }>>({});
     const tripsByOrder = useMemo(() => new Map(trips.filter(trip => trip.transport_order).map(trip => [trip.transport_order!.id, trip])), [trips]);
     const refresh = useCallback(async () => {
         const [ordersResponse, tripsResponse, vehiclesResponse, driversResponse, followUpsResponse] = await Promise.all([
@@ -99,6 +118,23 @@ export default function FleetDispatchPage() {
         setFollowUps(await followUpsResponse.json());
     }, []);
     useEffect(() => { void refresh().catch(error => setMessage(error.message)); }, [refresh]);
+    async function suggestResources(order: Order) {
+        setBusy(`suggest:${order.id}`);
+        setMessage("");
+        try {
+            const response = await apiFetch(`/fleet/dispatch-recommendations?order_id=${encodeURIComponent(order.id)}`);
+            const result = await response.json().catch(() => null);
+            if (!response.ok)
+                throw new Error(typeof result?.error === "string" ? result.error : "Could not create dispatch suggestions.");
+            setDispatchSuggestions(previous => ({ ...previous, [order.id]: result as DispatchSuggestions }));
+        }
+        catch (error) {
+            setMessage(error instanceof Error ? error.message : "Could not create dispatch suggestions.");
+        }
+        finally {
+            setBusy("");
+        }
+    }
     async function assignOrder(event: FormEvent<HTMLFormElement>, order: Order) {
         event.preventDefault();
         setMessage("");
@@ -158,7 +194,7 @@ export default function FleetDispatchPage() {
     const visibleOrders = orders.filter(order => !statusFilter || order.status === statusFilter);
     const pagination = useListPagination(visibleOrders, statusFilter);
     return <UiMain className="w-full min-w-0 space-y-5 px-4 py-8 sm:px-6 lg:px-8">
-    <UiHeader className="flex flex-wrap items-end justify-between gap-3"><UiBox><UiText className="text-xs font-bold uppercase tracking-widest text-forest">Fleet & trips</UiText><UiH1 className="mt-1 text-2xl font-bold">Dispatch</UiH1><UiText className="mt-1 text-sm text-slate-500">Assign orders, follow pickup and delivery milestones, and capture issues as they happen.</UiText></UiBox><UiBox className="flex gap-2"><Link href="/fleet/orders" className="rounded-lg border border-line px-3 py-2 text-sm font-semibold">Transport orders</Link><Link href="/fleet/trips" className="rounded-lg bg-forest px-3 py-2 text-sm font-semibold text-white">All trips</Link></UiBox></UiHeader>
+    <UiHeader className="flex flex-wrap items-end justify-between gap-3"><UiBox><UiText className="text-xs font-bold uppercase tracking-widest text-forest">Fleet & trips</UiText><UiH1 className="mt-1 text-2xl font-bold">Dispatch</UiH1><UiText className="mt-1 text-sm text-slate-500">Assign orders, follow pickup and delivery milestones, and capture issues as they happen.</UiText></UiBox><UiBox className="flex gap-2"><Link href="/fleet/dispatch-planner" className="rounded-lg bg-forest px-3 py-2 text-sm font-semibold text-white">Plan multi-stop trip</Link><Link href="/fleet/orders" className="rounded-lg border border-line px-3 py-2 text-sm font-semibold">Transport orders</Link><Link href="/fleet/trips" className="rounded-lg border border-line px-3 py-2 text-sm font-semibold">All trips</Link></UiBox></UiHeader>
     <LiveData onRefresh={refresh} paused={Boolean(busy || exceptionTrip)} interval={20000}/>
     {message && <UiAlert role="status" className="rounded-lg bg-slate-100 p-3 text-sm text-slate-700">{message}</UiAlert>}
     <UiSection className="overflow-hidden rounded-xl border border-line bg-white">
@@ -168,7 +204,11 @@ export default function FleetDispatchPage() {
             const exceptions = followUps.filter(item => item.trip_id === trip?.id && activeFollowUp(item));
             return <UiArticle key={order.id} className="bg-white p-4 sm:p-5"><UiBox className="flex items-start justify-between gap-2"><UiBox><UiH3 className="text-sm font-bold">{order.order_number}</UiH3><UiText className="text-xs text-slate-500">{order.customer.name}</UiText></UiBox><UiSpan className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold">{order.status.replaceAll("_", " ")}</UiSpan></UiBox><UiText className="mt-3 text-xs font-medium text-slate-700">{order.origin} → {order.destination}</UiText><UiText className="mt-1 text-[11px] text-slate-500">{[order.cargo_description, order.load_quantity && `${order.load_quantity} ${order.load_unit}`.trim()].filter(Boolean).join(" · ") || "Cargo details not set"}</UiText>{(order.pickup_due_at || order.delivery_due_at) && <UiText className="mt-2 text-[10px] text-slate-500">{order.pickup_due_at && <>Pickup by {labelTime(order.pickup_due_at)}</>}{order.pickup_due_at && order.delivery_due_at && " · "}{order.delivery_due_at && <>Deliver by {labelTime(order.delivery_due_at)}</>}</UiText>}
             {trip && <><UiBox className="mt-3 rounded-md bg-slate-50 p-2 text-xs"><UiText className="font-semibold">{trip.vehicle.registration_number} · {trip.driver.name}</UiText><UiText className="mt-1 text-slate-600">{milestone(order, trip)}</UiText></UiBox>{exceptions.length > 0 && <UiBox className="mt-2 space-y-1 rounded-md bg-amber-50 p-2 text-[11px] text-amber-900">{exceptions.map(item => <UiText key={item.id}><UiStrong>Needs attention:</UiStrong> {item.description}</UiText>)}</UiBox>}{trip.delivery_at && !trip.delivery_proof_name && !trip.delivery_signature_name && <UiText className="mt-2 text-[11px] font-semibold text-rose-700">Proof of delivery is missing.</UiText>}{!trip.delivery_at && <UiButton type="button" onClick={() => setExceptionTrip(exceptionTrip === trip.id ? "" : trip.id)} className="mt-3 text-xs font-semibold text-forest">{exceptionTrip === trip.id ? "Close issue form" : "Report a trip issue"}</UiButton>}{exceptionTrip === trip.id && <UiForm onSubmit={event => void reportException(event, trip)} className="mt-2 space-y-2"><UiSelect className={input} name="category"><option value="DELAY">Delay</option><option value="CUSTOMER_UNAVAILABLE">Customer unavailable</option><option value="VEHICLE_ISSUE">Vehicle issue</option><option value="CARGO_ISSUE">Cargo issue</option><option value="ROUTE_ISSUE">Route issue</option><option value="OTHER">Other</option></UiSelect><UiInput className={input} name="description" required maxLength={240} placeholder="Briefly describe the issue"/><UiButton disabled={busy === `exception:${trip.id}`} className="rounded-md bg-forest px-3 py-2 text-xs font-semibold text-white">{busy === `exception:${trip.id}` ? "Saving…" : "Add to follow-ups"}</UiButton></UiForm>}</>}
-            {!trip && order.status !== "CANCELLED" && <UiForm onSubmit={event => void assignOrder(event, order)} className="mt-3 grid gap-3 border-t border-line pt-3 sm:grid-cols-2 xl:grid-cols-4"><UiText className="text-xs font-semibold sm:col-span-2 xl:col-span-4">Assign truck and driver</UiText><UiInput className={input} name="trip_number" required maxLength={64} placeholder="Trip number (e.g. TR-204)"/><UiSelect className={input} name="vehicle_id" required defaultValue=""><option value="" disabled>Select truck</option>{vehicles.filter(vehicle => vehicle.status === "ACTIVE").map(vehicle => <option key={vehicle.id} value={vehicle.id}>{vehicle.registration_number}</option>)}</UiSelect><UiSelect className={input} name="driver_id" required defaultValue=""><option value="" disabled>Select driver</option>{drivers.filter(driver => driver.status === "ACTIVE").map(driver => <option key={driver.id} value={driver.id}>{driver.name}</option>)}</UiSelect><UiButton disabled={busy === order.id || !vehicles.some(vehicle => vehicle.status === "ACTIVE") || !drivers.some(driver => driver.status === "ACTIVE")} className="rounded-md bg-forest px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{busy === order.id ? "Assigning…" : "Create trip and assign"}</UiButton></UiForm>}
+            {!trip && order.status === "OPEN" && <UiBox className="mt-3 rounded-lg border border-line bg-slate-50 p-3">
+              <UiBox className="flex flex-wrap items-center justify-between gap-2"><UiBox><UiText className="text-xs font-semibold">Resource suggestions</UiText><UiText className="text-[10px] text-slate-500">Rule-based shortlist. Review and confirm before dispatch.</UiText></UiBox><UiButton type="button" disabled={busy === `suggest:${order.id}`} onClick={() => void suggestResources(order)} className="rounded-md border border-line bg-white px-3 py-2 text-xs font-semibold text-forest">{busy === `suggest:${order.id}` ? "Checking availability…" : dispatchSuggestions[order.id] ? "Refresh suggestions" : "Suggest truck and driver"}</UiButton></UiBox>
+              {dispatchSuggestions[order.id] && <><UiBox className="mt-3 space-y-2">{dispatchSuggestions[order.id].vehicles.slice(0, 5).map((candidate, index) => <UiBox key={candidate.vehicle_id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white p-2"><UiBox><UiText className="text-xs font-semibold">{index === 0 ? "Best fit · " : ""}{candidate.registration_number} <UiSpan className="ml-1 text-[10px] font-normal text-slate-500">{candidate.score}/100</UiSpan></UiText><UiText className="text-[10px] text-slate-600">{candidate.reasons.join(" ")}</UiText>{candidate.warnings.map(warning => <UiText key={warning} className="text-[10px] text-amber-800">{warning}</UiText>)}</UiBox><UiButton type="button" onClick={() => setSelectedResources(previous => ({ ...previous, [order.id]: { vehicleId: candidate.vehicle_id, driverId: previous[order.id]?.driverId || "" } }))} className="rounded border border-line px-2 py-1 text-[10px] font-semibold">{selectedResources[order.id]?.vehicleId === candidate.vehicle_id ? "Truck selected" : "Use truck"}</UiButton></UiBox>)}{dispatchSuggestions[order.id].vehicles.length === 0 && <UiText className="text-xs text-amber-800">No compatible available truck was found. Review vehicle status, active work, breakdowns, and capacity settings.</UiText>}</UiBox><UiText className="mt-2 text-[10px] text-slate-500">{dispatchSuggestions[order.id].drivers.length} driver(s) are free of recorded active trips. Shift, leave, and driver-hours checks are not available yet.</UiText><UiText className="mt-1 text-[10px] text-slate-400">{dispatchSuggestions[order.id].limitations[0]}</UiText></>}
+            </UiBox>}
+            {!trip && order.status === "OPEN" && <UiForm onSubmit={event => void assignOrder(event, order)} className="mt-3 grid gap-3 border-t border-line pt-3 sm:grid-cols-2 xl:grid-cols-4"><UiText className="text-xs font-semibold sm:col-span-2 xl:col-span-4">Confirm assignment</UiText><UiInput className={input} name="trip_number" required maxLength={64} placeholder="Trip number (e.g. TR-204)"/><UiSelect className={input} name="vehicle_id" required value={selectedResources[order.id]?.vehicleId || ""} onChange={event => setSelectedResources(previous => ({ ...previous, [order.id]: { vehicleId: event.target.value, driverId: previous[order.id]?.driverId || "" } }))}><option value="" disabled>Select truck</option>{(dispatchSuggestions[order.id] ? dispatchSuggestions[order.id].vehicles.map(candidate => ({ id: candidate.vehicle_id, registration_number: candidate.registration_number })) : vehicles.filter(vehicle => vehicle.status === "ACTIVE")).map(vehicle => <option key={vehicle.id} value={vehicle.id}>{vehicle.registration_number}</option>)}</UiSelect><UiSelect className={input} name="driver_id" required value={selectedResources[order.id]?.driverId || ""} onChange={event => setSelectedResources(previous => ({ ...previous, [order.id]: { vehicleId: previous[order.id]?.vehicleId || "", driverId: event.target.value } }))}><option value="" disabled>Select driver</option>{(dispatchSuggestions[order.id] ? dispatchSuggestions[order.id].drivers : drivers.filter(driver => driver.status === "ACTIVE")).map(driver => <option key={driver.id} value={driver.id}>{driver.name}</option>)}</UiSelect><UiButton disabled={busy === order.id || !vehicles.some(vehicle => vehicle.status === "ACTIVE") || !drivers.some(driver => driver.status === "ACTIVE") || Boolean(dispatchSuggestions[order.id] && (!dispatchSuggestions[order.id].vehicles.length || !dispatchSuggestions[order.id].drivers.length))} className="rounded-md bg-forest px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{busy === order.id ? "Assigning…" : "Create trip and assign"}</UiButton></UiForm>}
           </UiArticle>;
         })}{orders.filter(order => !statusFilter || order.status === statusFilter).length === 0 && <UiText className="p-8 text-center text-sm text-slate-500">No orders match this status.</UiText>}</UiBox>
     {pagination.controls}

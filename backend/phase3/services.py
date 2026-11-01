@@ -8,6 +8,7 @@ import uuid
 from urllib.parse import urlsplit
 from cryptography.fernet import Fernet
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from datetime import timedelta
 from .models import WebhookEndpoint, WebhookDelivery
@@ -43,6 +44,8 @@ def validate_public_webhook_url(url):
 
 def queue_webhook_event(tenant, event_type, data):
     if event_type not in SUPPORTED_WEBHOOK_EVENTS: return 0
+    from accounts.workspace_access import workspace_is_operational
+    if not workspace_is_operational(tenant): return 0
     event_id = uuid.uuid4()
     now = timezone.now()
     endpoints = [endpoint for endpoint in WebhookEndpoint.objects.filter(tenant=tenant, active=True) if event_type in endpoint.events]
@@ -63,7 +66,27 @@ class PinnedHTTPSConnection(http.client.HTTPSConnection):
 
 
 def deliver_one(delivery):
+    now = timezone.now()
+    with transaction.atomic():
+        delivery = WebhookDelivery.objects.select_for_update().select_related("endpoint", "endpoint__tenant").get(pk=delivery.pk)
+        if delivery.status == WebhookDelivery.Status.DELIVERING and delivery.claimed_at and delivery.claimed_at > now - timedelta(minutes=2):
+            return delivery.status
+        if delivery.status not in {WebhookDelivery.Status.QUEUED, WebhookDelivery.Status.RETRY, WebhookDelivery.Status.DELIVERING}:
+            return delivery.status
+        if delivery.next_attempt_at and delivery.next_attempt_at > now:
+            return delivery.status
+        delivery.status = WebhookDelivery.Status.DELIVERING
+        delivery.claimed_at = now
+        delivery.save(update_fields=["status", "claimed_at"])
     endpoint = delivery.endpoint
+    from accounts.workspace_access import workspace_is_operational
+    if not workspace_is_operational(endpoint.tenant):
+        delivery.status = WebhookDelivery.Status.FAILED
+        delivery.error = "Workspace is closed or not operational; outbound delivery stopped."
+        delivery.next_attempt_at = None
+        delivery.claimed_at = None
+        delivery.save(update_fields=["status", "error", "next_attempt_at", "claimed_at"])
+        return delivery.status
     try:
         parsed, address = validate_public_webhook_url(endpoint.url)
         secret = decrypt_signing_secret(endpoint)
@@ -92,6 +115,7 @@ def deliver_one(delivery):
         delivery.cycle_attempts += 1
         delivery.error = str(exc)[:500]
         schedule_retry(delivery)
+    delivery.claimed_at = None
     delivery.save()
     return delivery.status
 
@@ -104,10 +128,22 @@ def schedule_retry(delivery):
         delivery.next_attempt_at = timezone.now() + timedelta(seconds=min(3600, 30 * (2 ** (delivery.cycle_attempts - 1))))
 
 
-def deliver_due_webhooks(limit=100):
-    now = timezone.now()
+def due_webhook_deliveries(now=None):
+    now = now or timezone.now()
     from django.db.models import Q
-    pending = WebhookDelivery.objects.select_related("endpoint").filter(status__in=[WebhookDelivery.Status.QUEUED, WebhookDelivery.Status.RETRY], endpoint__active=True).filter(Q(next_attempt_at__isnull=True) | Q(next_attempt_at__lte=now))
-    rows = list(pending.order_by("created_at")[:limit])
+    stale_claim = Q(status=WebhookDelivery.Status.DELIVERING, claimed_at__lte=now-timedelta(minutes=2))
+    return WebhookDelivery.objects.select_related("endpoint").filter(endpoint__active=True).filter(
+        Q(status__in=[WebhookDelivery.Status.QUEUED, WebhookDelivery.Status.RETRY], next_attempt_at__isnull=True) |
+        Q(status__in=[WebhookDelivery.Status.QUEUED, WebhookDelivery.Status.RETRY], next_attempt_at__lte=now) |
+        stale_claim
+    )
+
+
+def count_due_webhooks(limit=100):
+    return len(list(due_webhook_deliveries().order_by("created_at").values_list("pk", flat=True)[:limit]))
+
+
+def deliver_due_webhooks(limit=100):
+    rows = list(due_webhook_deliveries().order_by("created_at")[:limit])
     for row in rows: deliver_one(row)
     return len(rows)

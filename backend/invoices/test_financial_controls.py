@@ -19,6 +19,7 @@ from invoices.models import Invoice, InvoiceLine
 from payments.models import Payment, PaymentAllocation
 from tenants.models import Tenant
 from vendors.models import Vendor
+from admin_console.models import Feature, Plan, PlanFeature, Subscription, TenantUsage
 
 
 @pytest.fixture
@@ -220,6 +221,33 @@ def test_concurrent_payments_are_serialized_on_postgresql(workspace,monkeypatch,
     assert statuses==([200,201] if scenario=="same_key" else [201,409])
     assert Payment.objects.count()==1
     assert all(sum(inv.payment_allocations.values_list("amount",flat=True))<=inv.invoice_total for inv in Invoice.objects.filter(tenant=s.tenant))
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.skipif(connection.vendor!="postgresql",reason="Requires PostgreSQL row locks")
+def test_concurrent_invoice_intake_observes_one_shared_quota(workspace):
+    from rest_framework.exceptions import PermissionDenied
+    s=workspace
+    plan=Plan.objects.create(name="Quota one",slug="quota-one",invoice_limit=1)
+    feature=Feature.objects.create(key="invoice_upload",name="Invoice upload")
+    PlanFeature.objects.create(plan=plan,feature=feature,enabled=True)
+    Subscription.objects.create(tenant=s.tenant,plan=plan,status=Subscription.Status.ACTIVE)
+    gate=Barrier(2)
+    def create_invoice():
+        close_old_connections()
+        try:
+            gate.wait(timeout=15)
+            try:
+                Invoice.objects.create(tenant=s.tenant)
+                return "created"
+            except PermissionDenied:
+                return "quota_rejected"
+        finally:
+            connections.close_all()
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        results=sorted(workers.map(lambda _: create_invoice(), range(2)))
+    assert results==["created","quota_rejected"]
+    assert TenantUsage.objects.get(tenant=s.tenant,metric="invoices_uploaded").used_count==1
 
 
 @pytest.mark.django_db(transaction=True)

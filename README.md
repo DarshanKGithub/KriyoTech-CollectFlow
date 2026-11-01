@@ -97,3 +97,11 @@ python manage.py test admin_console
 ## ERP and accounting integrations
 
 Open `/integrations/erp` for Microsoft Dynamics 365 Finance, ERPNext, TallyPrime and Zoho Books connections, import reviews, export snapshots and reconciliation. Read [ERP integration architecture and setup](docs/erp-integrations.md) before connecting an accounting system. Full production two-way operation still requires customer sandbox verification and the provider-specific work listed there.
+
+## Advanced transport platform roadmap
+
+The proposed expansion covers tracking history/geofences, multi-stop dispatch, fuel and maintenance, transport billing, customer/driver apps, AI assistance, Indian transport integrations, and later warehouse and load-marketplace modules. These documents describe planned work and distinguish it from existing code:
+
+- [Transport platform architecture](docs/transport-platform-architecture.md)
+- [Phased build plan, backlog and acceptance gates](docs/transport-platform-build-plan.md)
+- [Repository analysis and prerequisite fixes](docs/code-analysis-2026-10-31.md)

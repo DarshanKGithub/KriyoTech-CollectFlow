@@ -7,16 +7,28 @@ import time
 import urllib.parse
 from django.conf import settings
 from django.core.signing import Signer, BadSignature
+from cryptography.fernet import Fernet, InvalidToken
+
+
+def _secret_cipher():
+    key = hashlib.sha256(("kriyopay-admin-totp:" + settings.SECRET_KEY).encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(key))
 
 
 def encrypt_secret(secret: str) -> str:
-    """Encrypt secret key using Django's Signer/settings.SECRET_KEY."""
-    signer = Signer(salt="admin_mfa_secret_encryption")
-    return signer.sign(secret)
+    """Encrypt at rest; legacy signed values are upgraded after verification."""
+    return "fernet:" + _secret_cipher().encrypt(secret.encode()).decode()
 
 
 def decrypt_secret(encrypted_secret: str) -> str:
-    """Decrypt secret key using Django's Signer."""
+    """Read encrypted secrets and the previous signed-only storage format."""
+    if not encrypted_secret:
+        return ""
+    if encrypted_secret.startswith("fernet:"):
+        try:
+            return _secret_cipher().decrypt(encrypted_secret[7:].encode()).decode()
+        except (InvalidToken, ValueError, UnicodeDecodeError):
+            return ""
     signer = Signer(salt="admin_mfa_secret_encryption")
     try:
         return signer.unsign(encrypted_secret)

@@ -25,6 +25,19 @@ class AdminStaff(models.Model):
         return f"{self.user.email} ({self.role})"
 
 
+class AdminMFAChallenge(models.Model):
+    """Single-use password-authenticated credential, never an API session."""
+    token_hash = models.CharField(max_length=64, unique=True)
+    staff = models.ForeignKey(AdminStaff, on_delete=models.CASCADE)
+    mode = models.CharField(max_length=8, choices=[("setup", "Setup"), ("auth", "Verify")])
+    credential_fingerprint = models.CharField(max_length=64)
+    setup_secret = models.CharField(max_length=255, blank=True)
+    expires_at = models.DateTimeField(db_index=True)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class Plan(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=80, unique=True)
@@ -226,6 +239,7 @@ class RazorpayWebhookEvent(models.Model):
 
     publish_count = models.PositiveSmallIntegerField(default=0)
     next_attempt_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    processing_token = models.UUIDField(null=True, blank=True)
 
 
 class PaymentRefund(models.Model):

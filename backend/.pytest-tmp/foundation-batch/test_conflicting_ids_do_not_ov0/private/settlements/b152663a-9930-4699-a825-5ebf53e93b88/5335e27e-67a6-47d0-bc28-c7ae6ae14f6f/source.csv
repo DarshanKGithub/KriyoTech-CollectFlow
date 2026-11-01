@@ -1,0 +1,2 @@
+record_type,external_id,currency,amount,reverses_type,reverses_id
+REVERSAL,rev_1,INR,97,SETTLEMENT,setl_1

@@ -1,0 +1,120 @@
+
+> build
+> next build
+
+  ▲ Next.js 14.2.35
+  - Environments: .env.local
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+
+   We detected TypeScript in your project and reconfigured your tsconfig.json file for you. Strict-mode is set to false by default.
+   The following suggested values were added to your tsconfig.json. These values can be changed to fit your project's needs:
+
+   	- include was updated to add '.next-analysis/types/**/*.ts'
+
+
+./src/app/admin-mfa/page.tsx
+16:383  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+info  - Need to disable some ESLint rules? Learn more here: https://nextjs.org/docs/basic-features/eslint#disabling-rules
+   Collecting page data ...
+   Generating static pages (0/78) ...
+   Generating static pages (19/78) 
+   Generating static pages (38/78) 
+   Generating static pages (58/78) 
+ ✓ Generating static pages (78/78)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                              Size     First Load JS
+┌ ○ /                                    113 kB          282 kB
+├ ○ /_not-found                          880 B          88.7 kB
+├ ○ /admin-console                       9.27 kB         114 kB
+├ ○ /admin-console/audit-logs            3.05 kB         366 kB
+├ ○ /admin-console/companies             6.28 kB         257 kB
+├ ƒ /admin-console/companies/[tenantId]  6.74 kB         214 kB
+├ ○ /admin-console/payments              6.24 kB         384 kB
+├ ○ /admin-console/plans                 5.05 kB         162 kB
+├ ○ /admin-console/security              3.67 kB         246 kB
+├ ○ /admin-console/settlements           190 B           215 kB
+├ ○ /admin-console/subscriptions         3.05 kB         366 kB
+├ ○ /admin-console/usage                 3.05 kB         366 kB
+├ ○ /admin-login                         143 B          87.9 kB
+├ ○ /admin-mfa                           5.46 kB         101 kB
+├ ○ /ai-review                           3.81 kB         220 kB
+├ ○ /approval-rules                      209 B           386 kB
+├ ○ /approvals                           7.9 kB          236 kB
+├ ○ /attention                           8.51 kB         233 kB
+├ ○ /audit                               250 B           377 kB
+├ ○ /bank-reconciliation                 24.5 kB         389 kB
+├ ○ /billing                             6.02 kB         222 kB
+├ ○ /branches                            5.66 kB         222 kB
+├ ○ /bulk-actions                        209 B           386 kB
+├ ○ /compliance                          4.35 kB         224 kB
+├ ○ /custom-fields                       209 B           386 kB
+├ ○ /duplicates                          3.06 kB         228 kB
+├ ○ /email-intake                        209 B           386 kB
+├ ○ /exceptions                          7.46 kB         232 kB
+├ ○ /exports                             3.14 kB         238 kB
+├ ○ /exports/settings                    3.44 kB         220 kB
+├ ○ /financial-notes                     209 B           386 kB
+├ ○ /fleet                               252 B           392 kB
+├ ƒ /fleet/[feature]                     838 B           393 kB
+├ ○ /fleet/booking-history               3.37 kB         168 kB
+├ ○ /fleet/customer-invoices             6.92 kB         235 kB
+├ ○ /fleet/customer-notifications        3.55 kB         168 kB
+├ ○ /fleet/customer-portal               5.24 kB         170 kB
+├ ○ /fleet/customers                     3.89 kB         229 kB
+├ ○ /fleet/dispatch                      6.29 kB         231 kB
+├ ○ /fleet/dock-schedule                 5.35 kB         229 kB
+├ ○ /fleet/documents                     3.38 kB         230 kB
+├ ○ /fleet/driver                        9.68 kB         242 kB
+├ ○ /fleet/driver-salaries               10.8 kB         387 kB
+├ ○ /fleet/exception-center              8.73 kB         180 kB
+├ ○ /fleet/finance-settings              4.69 kB         225 kB
+├ ○ /fleet/freight-reconciliation        3.37 kB         230 kB
+├ ○ /fleet/live-tracking                 3.66 kB         230 kB
+├ ○ /fleet/maintenance                   3.82 kB         220 kB
+├ ○ /fleet/operational-reports           4.5 kB          279 kB
+├ ○ /fleet/orders                        4.32 kB         229 kB
+├ ○ /fleet/reliability                   5.17 kB         170 kB
+├ ○ /fleet/return-loads                  4.54 kB         231 kB
+├ ○ /fleet/revenue-leakage               4.51 kB         223 kB
+├ ○ /fleet/settings                      3.66 kB         220 kB
+├ ○ /fleet/truck-documents               3.35 kB         220 kB
+├ ○ /follow-ups                          210 B           386 kB
+├ ○ /forgot-password                     2.89 kB         219 kB
+├ ○ /grns                                5.76 kB         383 kB
+├ ○ /integrations                        5.95 kB         226 kB
+├ ○ /integrations/erp                    8.95 kB         247 kB
+├ ○ /integrations/gmail/callback         2.19 kB         219 kB
+├ ○ /invite/accept                       3.02 kB         223 kB
+├ ○ /invoices                            19.1 kB         388 kB
+├ ○ /login                               6.82 kB         166 kB
+├ ○ /notifications                       209 B           386 kB
+├ ○ /payments                            8.79 kB         282 kB
+├ ƒ /portal/[token]                      4.74 kB         271 kB
+├ ƒ /portal/shipment/[token]             4.46 kB         172 kB
+├ ○ /purchase-orders                     5.23 kB         382 kB
+├ ○ /reports                             209 B           386 kB
+├ ○ /reset-password                      3.07 kB         219 kB
+├ ○ /settings                            7.03 kB         235 kB
+├ ○ /settlements                         189 B           215 kB
+├ ○ /signup                              221 B           217 kB
+├ ○ /sla-rules                           209 B           386 kB
+├ ○ /users                               3.31 kB         238 kB
+├ ○ /vendor-aliases                      209 B           386 kB
+├ ○ /vendor-portal                       3.18 kB         220 kB
+├ ○ /vendors                             4.97 kB         240 kB
+└ ○ /whatsapp                            7.26 kB         230 kB
++ First Load JS shared by all            87.8 kB
+  ├ chunks/2117-1fc86af5dd18bc86.js      31.9 kB
+  ├ chunks/fd9d1056-29a9d49593613712.js  53.6 kB
+  └ other shared chunks (total)          2.25 kB
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

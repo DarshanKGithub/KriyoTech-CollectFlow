@@ -87,7 +87,7 @@ export default function TransportCustomerInvoicesPage() {
             return;
         setBusy(order.id);
         setMessage("");
-        const response = await apiFetch("/fleet/customer-invoices", { method: "POST", body: JSON.stringify({ trip_id: order.trip_id, invoice_number: invoiceNumber, ...(dueDate.trim() ? { due_date: dueDate.trim() } : {}) }) });
+        const response = await apiFetch("/fleet/customer-invoices", { method: "POST", body: JSON.stringify({ trip_id: order.trip_id, order_id: order.id, invoice_number: invoiceNumber, ...(dueDate.trim() ? { due_date: dueDate.trim() } : {}) }) });
         const result = await response.json().catch(() => null);
         if (!response.ok)
             setMessage(typeof result?.error === "string" ? result.error : "Could not create the customer invoice.");

@@ -5,6 +5,7 @@ from django.views.decorators.http import require_GET
 from urllib.parse import urlencode
 from django.urls import include, path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView, TokenBlacklistView
+from rest_framework.throttling import ScopedRateThrottle
 from accounts.auth import UnifiedLoginSerializer
 from settlements.urls import platform_patterns
 from accounts.password_reset import PasswordResetConfirm, PasswordResetRequest
@@ -12,6 +13,8 @@ from accounts.password_reset import PasswordResetConfirm, PasswordResetRequest
 
 class UnifiedLoginView(TokenObtainPairView):
     serializer_class = UnifiedLoginSerializer
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "admin_login"
 
 
 def service_identity(request):

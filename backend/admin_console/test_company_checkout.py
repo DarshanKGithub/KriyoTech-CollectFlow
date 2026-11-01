@@ -11,6 +11,7 @@ from accounts.models import Membership
 from tenants.models import Tenant
 from .billing import GatewayError, activate_paid_subscription
 from .models import AdminStaff, BillingInvoice, Payment, Plan, RazorpayWebhookEvent, Subscription
+from .test_helpers import authenticate_staff
 
 
 @override_settings(RAZORPAY_KEY_ID="rzp_test", RAZORPAY_KEY_SECRET="test-secret", EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
@@ -18,7 +19,7 @@ class CompanyCheckoutTests(APITestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(username="staff", email="staff@example.test")
         self.staff = AdminStaff.objects.create(user=self.user, role="SUPER_ADMIN")
-        self.client.force_authenticate(self.user)
+        authenticate_staff(self.client, self.staff)
         self.plan = Plan.objects.create(name="Starter", slug="starter", monthly_price=750000)
         self.tenant = Tenant.objects.create(name="Transport Co", workspace_key="transport")
         self.subscription = Subscription.objects.create(tenant=self.tenant, plan=self.plan, status="ONBOARDING")

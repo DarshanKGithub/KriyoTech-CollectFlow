@@ -27,7 +27,7 @@ from accounts.models import Membership
 from accounts.permissions import HasTenantMembership
 from audit.models import AuditLog
 from documents.models import Document
-from .models import DockAppointment, DriverAdvance, DriverAdvanceRecovery, DriverExpenseSettlement, DriverPayPolicy, DriverSalaryAdjustment, DriverSalaryPayment, DriverSalaryRecord, DriverTripEarning, FleetCustomer, FleetDock, FleetDriver, FleetFollowUp, FleetLogisticsDocument, FleetMaintenanceRecord, FleetTrip, FleetTripLocation, FleetVehicle, FleetVehicleDocument, FreightImportBatch, FreightImportRow, ReturnLoadOffer, TransportCollection, TransportInvoice, TransportOrder, TripExpenseLine, TripRevenueLine
+from .models import DockAppointment, DriverAdvance, DriverAdvanceRecovery, DriverExpenseSettlement, DriverPayPolicy, DriverSalaryAdjustment, DriverSalaryPayment, DriverSalaryRecord, DriverTripEarning, FleetCustomer, FleetDock, FleetDriver, FleetFollowUp, FleetLogisticsDocument, FleetMaintenanceRecord, FleetResourceReservation, FleetTrip, FleetTripManifestItem, FleetTripStop, FleetTripLocation, FleetTripLocationSample, FleetVehicle, FleetVehicleDocument, FreightImportBatch, FreightImportRow, ReturnLoadOffer, TransportCollection, TransportInvoice, TransportOrder, TripExpenseLine, TripRevenueLine
 from .serializers import DriverAdvanceCreateSerializer, DriverAdvanceRecoveryCreateSerializer, DriverPayPolicySerializer, DriverSalaryAdjustmentSerializer, DriverSalaryPaymentSerializer, DriverSalaryRecordSerializer, FleetCustomerSerializer, FleetDriverSerializer, FleetFollowUpSerializer, FleetTripSerializer, FleetVehicleSerializer, TransportCollectionCreateSerializer, TransportInvoiceCreateSerializer, TransportOrderSerializer, TripExpenseLineSerializer, TripRevenueLineSerializer
 from .compatibility import load_compatibility
 
@@ -485,7 +485,19 @@ class TransportInvoices(APIView):
         serializer = TransportInvoiceCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         trip = get_object_or_404(FleetTrip.objects.select_for_update(of=("self",)).select_related("transport_order__customer"), tenant=request.tenant, id=serializer.validated_data["trip_id"])
-        order = get_object_or_404(TransportOrder.objects.select_for_update(), pk=trip.transport_order_id, tenant=request.tenant) if trip.transport_order_id else None
+        manifest_order_ids = list(FleetTripManifestItem.objects.filter(tenant=request.tenant, trip=trip)
+            .exclude(status=FleetTripManifestItem.Status.CANCELLED).values_list("order_id", flat=True))
+        chosen_order_id = serializer.validated_data.get("order_id")
+        if chosen_order_id:
+            if chosen_order_id not in manifest_order_ids and chosen_order_id != trip.transport_order_id:
+                return Response({"error": "Choose a shipment carried on this trip."}, status=400)
+        elif len(manifest_order_ids) > 1:
+            return Response({"error": "Choose which shipment on this multi-order trip to invoice."}, status=400)
+        elif manifest_order_ids:
+            chosen_order_id = manifest_order_ids[0]
+        else:
+            chosen_order_id = trip.transport_order_id
+        order = get_object_or_404(TransportOrder.objects.select_for_update().select_related("customer"), pk=chosen_order_id, tenant=request.tenant) if chosen_order_id else None
         if order is None:
             return Response({"error": "Link this trip to a customer transport order before billing."}, status=400)
         if trip.delivery_at is None or order.status != TransportOrder.Status.DELIVERED:
@@ -693,7 +705,21 @@ class TripCollection(APIView):
         try:
             trip = serializer.save(tenant=request.tenant, created_by=request.user)
             if trip.transport_order_id:
-                TransportOrder.objects.filter(id=trip.transport_order_id, tenant=request.tenant).update(status=TransportOrder.Status.ASSIGNED, updated_at=timezone.now())
+                order = TransportOrder.objects.select_for_update().select_related("customer").get(id=trip.transport_order_id, tenant=request.tenant)
+                FleetTripManifestItem.objects.get_or_create(tenant=request.tenant, trip=trip, order=order,
+                    defaults={"quantity": order.load_quantity, "load_unit": order.load_unit})
+                for sequence, kind, address, lat, lon, due in [
+                    (1, FleetTripStop.Kind.PICKUP, order.origin, order.origin_latitude, order.origin_longitude, order.pickup_due_at),
+                    (2, FleetTripStop.Kind.DELIVERY, order.destination, order.destination_latitude, order.destination_longitude, order.delivery_due_at),
+                ]:
+                    FleetTripStop.objects.get_or_create(tenant=request.tenant, trip=trip, sequence=sequence,
+                        defaults={"order": order, "kind": kind, "address": address, "latitude": lat, "longitude": lon,
+                                  "window_end": due})
+                order.status = TransportOrder.Status.ASSIGNED
+                order.save(update_fields=["status", "updated_at"])
+            if trip.starts_at and trip.ends_at:
+                FleetResourceReservation.objects.get_or_create(tenant=request.tenant, trip=trip,
+                    defaults={"vehicle": vehicle, "driver": driver, "starts_at": trip.starts_at, "ends_at": trip.ends_at})
         except IntegrityError:
             return Response({"error": "A trip with this number already exists in this workspace."}, status=409)
         audit(request, "FLEET_TRIP_CREATED", trip)
@@ -1674,14 +1700,25 @@ class TripDetail(APIView):
             return Response({"error": "You can only view your assigned trips."}, status=403)
         return Response(FleetTripSerializer(trip, context={"tenant": request.tenant}).data)
 
+    @transaction.atomic
     def patch(self, request, trip_id):
         if request.membership.role not in EDIT_ROLES:
             return Response({"error": "Fleet edit permission required"}, status=403)
-        trip = get_object_or_404(FleetTrip, tenant=request.tenant, id=trip_id)
+        trip = get_object_or_404(FleetTrip.objects.select_for_update(), tenant=request.tenant, id=trip_id)
         if trip.status not in (FleetTrip.Status.DRAFT, FleetTrip.Status.IN_PROGRESS, FleetTrip.Status.COMPLETED, FleetTrip.Status.REJECTED):
             return Response({"error": "Only draft, in-progress, completed, or rejected trips can be edited."}, status=409)
+        # Lock resources before overlap validation; trip creation uses the same resource locks.
+        vehicle_id = request.data.get("vehicle_id", trip.vehicle_id)
+        driver_id = request.data.get("driver_id", trip.driver_id)
+        FleetVehicle.objects.select_for_update().filter(tenant=request.tenant, id=vehicle_id).exists()
+        FleetDriver.objects.select_for_update().filter(tenant=request.tenant, id=driver_id).exists()
         serializer = FleetTripSerializer(trip, data=request.data, partial=True, context={"tenant": request.tenant})
         serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        if FleetTrip.objects.filter(tenant=request.tenant, status__in=[FleetTrip.Status.DRAFT, FleetTrip.Status.IN_PROGRESS, FleetTrip.Status.SUBMITTED]).filter(
+            Q(vehicle=values["vehicle"]) | Q(driver=values["driver"])
+        ).exclude(pk=trip.pk).exists():
+            return Response({"error": "The truck or driver already has an active trip. Complete or review that trip before reassignment."}, status=409)
         trip = serializer.save()
         audit(request, "FLEET_TRIP_UPDATED", trip)
         return Response(FleetTripSerializer(trip, context={"tenant": request.tenant}).data)
@@ -1786,6 +1823,7 @@ class TripAction(APIView):
     @transaction.atomic
     def post(self, request, trip_id, action):
         trip = get_object_or_404(FleetTrip.objects.select_for_update(of=("self",)).select_related("transport_order"), tenant=request.tenant, id=trip_id)
+        has_ordered_stops = FleetTripStop.objects.filter(tenant=request.tenant, trip=trip).exists()
         if trip.transport_order_id:
             trip.transport_order = get_object_or_404(TransportOrder.objects.select_for_update(), pk=trip.transport_order_id, tenant=request.tenant)
         driver_earning_warning = ""
@@ -1845,6 +1883,9 @@ class TripAction(APIView):
             if proof_id:
                 trip.delivery_proof = Document.objects.filter(tenant=request.tenant, id=proof_id).first()
                 if trip.delivery_proof is None: return Response({"error": "Delivery proof document not found."}, status=400)
+            if has_ordered_stops and FleetTripStop.objects.filter(tenant=request.tenant, trip=trip,
+                kind=FleetTripStop.Kind.DELIVERY).exclude(status=FleetTripStop.Status.COMPLETED).exists():
+                return Response({"error": "Complete every planned delivery stop before checking out the trip."}, status=409)
             verb = "FLEET_TRIP_COMPLETED"
         elif action == "submit":
             if request.membership.role not in EDIT_ROLES and not is_assigned_driver:
@@ -1890,17 +1931,37 @@ class TripAction(APIView):
                     audit(request, "FLEET_DRIVER_TRIP_EARNING_ACCRUED", earning, {"trip_id": str(trip.id), "amount": str(earning.amount), "basis": earning.basis})
         else:
             return Response({"error": "Unknown trip action"}, status=404)
-        if trip.transport_order_id:
-            order_status = {
-                "start": TransportOrder.Status.LOADING,
-                "load": TransportOrder.Status.IN_TRANSIT,
-                "complete": TransportOrder.Status.DELIVERED,
-            }.get(action)
-            if order_status:
-                order_update = TransportOrder.objects.filter(id=trip.transport_order_id, tenant=request.tenant)
-                if action == "start": order_update = order_update.filter(status=TransportOrder.Status.ASSIGNED)
-                elif action == "load": order_update = order_update.filter(status=TransportOrder.Status.LOADING)
-                order_update.update(status=order_status, updated_at=timezone.now())
+        manifest = list(FleetTripManifestItem.objects.select_for_update().filter(tenant=request.tenant, trip=trip).select_related("order"))
+        if not manifest and trip.transport_order_id:
+            order = trip.transport_order
+            item, _ = FleetTripManifestItem.objects.get_or_create(tenant=request.tenant, trip=trip, order=order,
+                defaults={"quantity": order.load_quantity, "load_unit": order.load_unit})
+            manifest = [item]
+        if action == "start":
+            for item in ([] if has_ordered_stops else manifest):
+                if item.status == FleetTripManifestItem.Status.ASSIGNED:
+                    item.order.status = TransportOrder.Status.LOADING
+                    item.order.save(update_fields=["status", "updated_at"])
+        elif action == "load":
+            for item in ([] if has_ordered_stops else manifest):
+                item.status = FleetTripManifestItem.Status.IN_TRANSIT
+                item.save(update_fields=["status"])
+                item.order.status = TransportOrder.Status.IN_TRANSIT
+                item.order.save(update_fields=["status", "updated_at"])
+        elif action == "complete":
+            for item in ([] if has_ordered_stops else manifest):
+                item.status = FleetTripManifestItem.Status.DELIVERED
+                item.save(update_fields=["status"])
+                delivered = sum((row.quantity or Decimal("0") for row in FleetTripManifestItem.objects.filter(
+                    tenant=request.tenant, order=item.order, status=FleetTripManifestItem.Status.DELIVERED)), Decimal("0"))
+                assigned = sum((row.quantity or Decimal("0") for row in FleetTripManifestItem.objects.exclude(
+                    status=FleetTripManifestItem.Status.CANCELLED).filter(tenant=request.tenant, order=item.order).exclude(
+                    trip__status=FleetTrip.Status.CANCELLED)), Decimal("0"))
+                total = item.order.load_quantity or assigned
+                item.order.status = (TransportOrder.Status.DELIVERED if delivered >= total else
+                    TransportOrder.Status.PARTIALLY_DELIVERED if delivered > 0 else TransportOrder.Status.PARTIALLY_ASSIGNED)
+                item.order.save(update_fields=["status", "updated_at"])
+            FleetResourceReservation.objects.filter(tenant=request.tenant, trip=trip, released_at__isnull=True).update(released_at=timezone.now())
         trip.save()
         audit_metadata = {"note": trip.review_note}
         if action in ("approve", "reject"):
@@ -2010,6 +2071,75 @@ class FleetLiveLocations(APIView):
             "refresh_seconds": 15, "stale_after_seconds": 120})
 
 
+class FleetTripLocationHistory(APIView):
+    permission_classes = [HasTenantMembership]
+
+    def get(self, request, trip_id):
+        trip = get_object_or_404(FleetTrip.objects.select_related("driver"), tenant=request.tenant, id=trip_id)
+        role = request.membership.role
+        if role == Membership.Role.DRIVER:
+            if trip.driver.user_id != request.user.id:
+                return Response({"error": "This trip is not assigned to your driver account."}, status=404)
+        elif role not in {Membership.Role.OWNER, Membership.Role.FINANCE, Membership.Role.APPROVER, Membership.Role.FLEET}:
+            return Response({"error": "Fleet tracking access required."}, status=403)
+
+        try:
+            limit = int(request.query_params.get("limit", "1000"))
+            if not 1 <= limit <= 5000:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response({"error": "limit must be an integer between 1 and 5000."}, status=400)
+
+        filters = {"tenant": request.tenant, "trip": trip}
+        window_from = None
+        window_to = None
+        for parameter, field in (("from", "captured_at__gte"), ("to", "captured_at__lte")):
+            value = request.query_params.get(parameter)
+            if value:
+                timestamp = parse_datetime(value)
+                if not timestamp or not timezone.is_aware(timestamp):
+                    return Response({"error": f"{parameter} must be an ISO timestamp with a timezone."}, status=400)
+                if parameter == "from":
+                    window_from = timestamp
+                else:
+                    window_to = timestamp
+        now = timezone.now()
+        if window_from and window_to and window_to < window_from:
+            return Response({"error": "to must be the same as or later than from."}, status=400)
+        if window_from and window_to and window_to - window_from > timedelta(days=31):
+            return Response({"error": "Location history windows cannot exceed 31 days."}, status=400)
+        if window_from is None and window_to is None:
+            window_to = now
+            window_from = now - timedelta(days=30)
+        elif window_from is None:
+            window_from = window_to - timedelta(days=30)
+        elif window_to is None:
+            window_to = window_from + timedelta(days=30)
+        filters["captured_at__gte"] = window_from
+        filters["captured_at__lte"] = window_to
+        try:
+            offset = int(request.query_params.get("offset", "0"))
+            if not 0 <= offset <= 10000000:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response({"error": "offset must be a non-negative integer no greater than 10000000."}, status=400)
+
+        samples = list(FleetTripLocationSample.objects.filter(**filters).order_by("captured_at", "id")[offset:offset + limit + 1])
+        has_more = len(samples) > limit
+        samples = samples[:limit]
+        points = [{
+            "latitude": str(sample.latitude), "longitude": str(sample.longitude),
+            "accuracy_m": str(sample.accuracy_m) if sample.accuracy_m is not None else None,
+            "speed_kmh": str(sample.speed_kmh) if sample.speed_kmh is not None else None,
+            "heading_degrees": str(sample.heading_degrees) if sample.heading_degrees is not None else None,
+            "captured_at": sample.captured_at.isoformat(),
+        } for sample in samples]
+        return Response({"trip_id": str(trip.id), "count": len(points), "points": points,
+            "has_more": has_more, "next_offset": offset + limit if has_more else None,
+            "max_limit": 5000, "window_from": window_from.isoformat(), "window_to": window_to.isoformat(),
+            "window_max_days": 31})
+
+
 class DriverTripLocation(APIView):
     permission_classes = [HasTenantMembership]
 
@@ -2048,14 +2178,20 @@ class DriverTripLocation(APIView):
             return Response({"error": "GPS speed is invalid."}, status=400)
         if heading is not None and (not heading.is_finite() or not 0 <= heading < 360):
             return Response({"error": "GPS heading must be between 0 and 359.99 degrees."}, status=400)
+        if FleetTripLocationSample.objects.filter(tenant=request.tenant, client_event_id=event_id).exists():
+            return Response({"accepted": True, "duplicate": True}, status=200)
         location = FleetTripLocation.objects.select_for_update().filter(tenant=request.tenant, trip=trip).first()
-        if location and location.client_event_id == event_id:
-            return Response(trip_location_data(trip, location), status=200)
-        if location and captured_at <= location.captured_at:
-            return Response({**trip_location_data(trip, location), "ignored_stale_update": True}, status=200)
-        values = {"reported_by": request.user, "latitude": latitude, "longitude": longitude,
+        values = {"reported_by": request.user, "source_provider": "PHONE", "latitude": latitude, "longitude": longitude,
             "accuracy_m": accuracy, "speed_kmh": (speed_mps * Decimal("3.6")) if speed_mps is not None else None,
             "heading_degrees": heading, "captured_at": captured_at, "client_event_id": event_id}
+        try:
+            with transaction.atomic():
+                sample = FleetTripLocationSample.objects.create(tenant=request.tenant, trip=trip, **values)
+        except IntegrityError:
+            return Response({"accepted": True, "duplicate": True}, status=200)
+        if location and captured_at <= location.captured_at:
+            return Response({**trip_location_data(trip, location), "historical_sample_recorded": True,
+                "latest_unchanged": True}, status=200)
         if location:
             for field, value in values.items(): setattr(location, field, value)
             location.save()
@@ -2064,8 +2200,11 @@ class DriverTripLocation(APIView):
                 location = FleetTripLocation.objects.create(tenant=request.tenant, trip=trip, **values)
             except IntegrityError:
                 return Response({"error": "This GPS update was already submitted."}, status=409)
-        from .routing import record_motion
+        from .routing import record_motion, record_route_deviation
         record_motion(trip, location)
+        from .geofencing import record_geofence_sample
+        record_geofence_sample(sample)
+        record_route_deviation(sample)
         return Response(trip_location_data(trip, location), status=201)
 
 

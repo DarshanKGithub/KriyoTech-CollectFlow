@@ -7,7 +7,7 @@ import { createTheme, ThemeProvider, useTheme } from "@mui/material/styles";
 import { financeTokens as baseFinanceTokens } from "@/lib/finance-design";
 import { BarChart } from "@mui/x-charts/BarChart";
 import { PieChart } from "@mui/x-charts/PieChart";
-import { ArrowUpRight, CircleAlert } from "lucide-react";
+import { ArrowUpRight, CircleAlert, Truck } from "lucide-react";
 import { OverviewPriorityChart } from "@/components/overview-priority-chart";
 import { LiveData } from "@/components/live-data";
 import type { DashboardAnalytics } from "@/components/overview-charts";
@@ -20,12 +20,26 @@ export type OverviewSummary = {
   payment_ready: number; payment_ready_value: string | number;
 };
 
+export type FleetSnapshot = {
+  active_vehicles: number;
+  active_drivers: number;
+  trips_in_progress: number;
+  trips_awaiting_review: number;
+  open_follow_ups: number;
+  approved_trip_margin: string;
+  tracking_available: boolean;
+  live_locations: number | null;
+  stale_locations: number | null;
+  waiting_locations: number | null;
+};
+
 function Panel({ children, area, label }: { children: ReactNode; area: string; label: string }) {
   return <Box component="section" aria-label={label} sx={{ gridArea: { md: area }, border: "1px solid", borderColor: "divider", borderRadius: "16px", p: { xs: 2, md: 2.25 }, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", bgcolor: "background.paper", boxShadow: "0 2px 8px #172b2705", position: "relative" }}>{children}</Box>;
 }
 
-export function OverviewVisualDashboard({ summary, profile, loading, refreshing, message, onRefresh }: {
+export function OverviewVisualDashboard({ summary, profile, fleet, fleetMessage, loading, refreshing, message, onRefresh }: {
   summary: OverviewSummary | null; profile: NavigationAccess | null; loading: boolean;
+  fleet: FleetSnapshot | null; fleetMessage: string;
   refreshing: boolean; message: string; onRefresh: (silent?: boolean) => Promise<void>;
 }) {
   const parentTheme = useTheme();
@@ -61,12 +75,40 @@ export function OverviewVisualDashboard({ summary, profile, loading, refreshing,
   const active = groups.reduce((sum, group) => sum + group.value, 0);
   const signIn = /sign in|session/i.test(message);
 
-  return <ThemeProvider theme={theme}><Box component="main" sx={{ flex: 1, minHeight: 0, minWidth: 0, bgcolor: "background.default", color: "text.primary", p: { xs: 2, md: 2.5 }, display: "flex", flexDirection: "column", gap: 1.5, "@media (min-width:900px) and (max-height:720px)": { p: 1.5, gap: 1 }, "& .MuiChartsAxis-tickLabel": { fill: financeTokens.muted }, "& .MuiChartsAxis-line, & .MuiChartsAxis-tick": { stroke: financeTokens.border }, "& .MuiChartsGrid-line": { stroke: financeTokens.border, strokeDasharray: "3 5" }, "& .text-slate-500": { color: financeTokens.muted }, "& > .mt-3": { marginTop: 0, flexShrink: 0 } }}>
+  return <ThemeProvider theme={theme}><Box component="main" sx={{ flex: 1, minHeight: 0, minWidth: 0, overflowY: "auto", bgcolor: "background.default", color: "text.primary", p: { xs: 2, md: 2.5 }, display: "flex", flexDirection: "column", gap: 1.5, "@media (min-width:900px) and (max-height:720px)": { p: 1.5, gap: 1 }, "& .MuiChartsAxis-tickLabel": { fill: financeTokens.muted }, "& .MuiChartsAxis-line, & .MuiChartsAxis-tick": { stroke: financeTokens.border }, "& .MuiChartsGrid-line": { stroke: financeTokens.border, strokeDasharray: "3 5" }, "& .text-slate-500": { color: financeTokens.muted }, "& > .mt-3": { marginTop: 0, flexShrink: 0 } }}>
     <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between", flexShrink: 0, gap: 1 }}>
-      <Box><Typography component="h1" sx={{ fontSize: { xs: 22, md: 25 }, fontWeight: 600, letterSpacing: "-0.04em" }}>Workspace overview<span style={{ color: financeTokens.brand }}>.</span></Typography><Typography variant="caption" color="text.secondary">A clear view of your invoices and money.</Typography></Box>
+      <Box><Typography component="h1" sx={{ fontSize: { xs: 22, md: 25 }, fontWeight: 600, letterSpacing: "-0.04em" }}>Business overview<span style={{ color: financeTokens.brand }}>.</span></Typography><Typography variant="caption" color="text.secondary">Finance and fleet operations at a glance.</Typography></Box>
       {canShowNavigation("/invoices", profile) && <Button component={NextLink} href="/invoices" variant="outlined" endIcon={<ArrowUpRight size={14} />}>Invoices</Button>}
     </Stack>
     {message && <Alert severity="warning" action={signIn ? <Button component={NextLink} href="/login">Sign in</Button> : <Button disabled={refreshing} onClick={() => void onRefresh()}>Retry</Button>}>{message}{summary ? " Showing previous data." : ""}</Alert>}
+    {canShowNavigation("/fleet", profile) && <Box component="section" aria-label="Fleet operations snapshot" sx={{ border: "1px solid", borderColor: "divider", borderRadius: 3, px: { xs: 1.5, md: 2 }, py: 1.5, bgcolor: "background.paper", display: "flex", flexDirection: "column", gap: 1.5 }}>
+      <Stack direction={{ xs: "column", sm: "row" }} sx={{ alignItems: { xs: "stretch", sm: "center" }, justifyContent: "space-between", gap: 1.25 }}>
+        <Stack direction="row" spacing={1.25} sx={{ alignItems: "center", minWidth: 0 }}>
+          <Box sx={{ width: 36, height: 36, display: "grid", placeItems: "center", flexShrink: 0, borderRadius: 2, color: "primary.main", bgcolor: "action.selected" }}><Truck size={18}/></Box>
+          <Box sx={{ minWidth: 0 }}><Typography component="h2" variant="subtitle2">Fleet operations</Typography><Typography variant="caption" color="text.secondary">Live activity and trip review from your workspace</Typography></Box>
+        </Stack>
+        <Stack direction="row" spacing={1}>
+          {canShowNavigation("/fleet/dispatch", profile) && <Button component={NextLink} href="/fleet/dispatch" variant="outlined" size="small" endIcon={<ArrowUpRight size={14}/>}>Dispatch</Button>}
+          {canShowNavigation("/fleet/live-tracking", profile) && <Button component={NextLink} href="/fleet/live-tracking" variant="contained" size="small" endIcon={<ArrowUpRight size={14}/>}>Live fleet</Button>}
+        </Stack>
+      </Stack>
+      {fleet ? <>
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,minmax(0,1fr))", md: "repeat(5,minmax(0,1fr))" }, border: "1px solid", borderColor: "divider", borderRadius: 2, overflow: "hidden" }}>
+          {[
+            { label: "Trips underway", value: fleet.trips_in_progress, note: `${fleet.active_vehicles} active trucks`, color: "text.primary" },
+            { label: "Live GPS", value: fleet.tracking_available ? fleet.live_locations ?? 0 : "—", note: fleet.tracking_available ? "Location within 2 minutes" : "Restricted for this role", color: "success.main" },
+            { label: "Stale / waiting", value: fleet.tracking_available ? (fleet.stale_locations ?? 0) + (fleet.waiting_locations ?? 0) : "—", note: fleet.tracking_available ? `${fleet.stale_locations ?? 0} stale · ${fleet.waiting_locations ?? 0} waiting` : "Restricted for this role", color: fleet.tracking_available && ((fleet.stale_locations ?? 0) + (fleet.waiting_locations ?? 0)) ? "warning.main" : "text.primary" },
+            { label: "Needs review", value: fleet.trips_awaiting_review + fleet.open_follow_ups, note: `${fleet.trips_awaiting_review} trips · ${fleet.open_follow_ups} follow-ups`, color: fleet.trips_awaiting_review + fleet.open_follow_ups ? "warning.main" : "text.primary" },
+            { label: "Approved trip margin", value: formatMoney(String(fleet.approved_trip_margin)), note: `${fleet.active_drivers} active drivers`, color: "text.primary" },
+          ].map((metric, index) => <Box key={metric.label} sx={{ minWidth: 0, px: 1.5, py: 1.2, borderRight: { xs: index % 2 === 0 ? "1px solid" : "none", md: index < 4 ? "1px solid" : "none" }, borderBottom: { xs: index < 4 ? "1px solid" : "none", md: "none" }, borderColor: "divider" }}>
+            <Typography variant="caption" color="text.secondary" noWrap>{metric.label}</Typography>
+            <Typography sx={{ mt: .35, fontSize: { xs: 17, md: 19 }, fontWeight: 600, color: metric.color, fontVariantNumeric: "tabular-nums", overflowWrap: "anywhere" }}>{metric.value}</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontSize: 10 }} noWrap>{metric.note}</Typography>
+          </Box>)}
+        </Box>
+        {fleetMessage && <Typography role="status" variant="caption" color="warning.main">{fleetMessage}</Typography>}
+      </> : <Typography role="status" variant="body2" color={fleetMessage ? "warning.main" : "text.secondary"}>{fleetMessage || "Fleet summary is unavailable right now."}</Typography>}
+    </Box>}
     {loading ? <Box sx={{ flex: 1, display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 1.5, minHeight: 0 }}>{[0, 1, 2, 3].map(key => <Skeleton key={key} variant="rounded" sx={{ height: "100%", minHeight: 100, bgcolor: "action.selected" }} />)}</Box> : summary && <>
       <Box sx={{ flex: 1, minHeight: 0, display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr", md: "repeat(12,minmax(0,1fr))" }, gridTemplateRows: { md: "minmax(0,1fr) minmax(0,1fr)" }, gridTemplateAreas: { md: '"activity activity activity activity activity activity activity position position position position position" "attention attention attention workflow workflow workflow workflow aging aging aging aging aging"' }, "& > section": { minHeight: { xs: 240, md: 0 } } }}>
         <Panel area="activity" label="Invoice activity">

@@ -29,10 +29,11 @@ def provider_status():
 
 def queue_customer_notices():
     from .access import fleet_enabled
+    from accounts.workspace_access import workspace_is_operational
     count=0;now=timezone.now()
     links=ShipmentAccessLink.objects.filter(revoked_at__isnull=True,expires_at__gt=now,tenant__is_deleted=False).select_related("tenant","trip__transport_order")
     for link in links:
-        if not fleet_enabled(link.tenant):continue
+        if not workspace_is_operational(link.tenant) or not fleet_enabled(link.tenant):continue
         trip=link.trip;order=trip.transport_order
         if not order or not link.consent_note:continue
         events=[(f"status:{order.status}",order.status)]
@@ -95,6 +96,7 @@ def recover_stale_notices():
 
 def process_notices(notice_id=None):
     from .access import fleet_enabled
+    from accounts.workspace_access import workspace_is_operational
     now=timezone.now()
     # A worker interrupted after sending must never blindly resend the same message.
     recover_stale_notices()
@@ -107,7 +109,7 @@ def process_notices(notice_id=None):
             notice=ShipmentNotice.objects.select_for_update(of=("self",)).select_related("link__tenant").get(id=notice_id)
             if notice.status!="PENDING":continue
             recipient=notice.link.notify_email if notice.channel=="EMAIL" else notice.link.notify_phone
-            if not fleet_enabled(notice.link.tenant) or notice.link.revoked_at or notice.link.expires_at<=now or not recipient or recipient!=notice.payload["recipient"]:
+            if not workspace_is_operational(notice.link.tenant) or not fleet_enabled(notice.link.tenant) or notice.link.revoked_at or notice.link.expires_at<=now or not recipient or recipient!=notice.payload["recipient"]:
                 notice.status="CANCELLED";notice.save(update_fields=["status","updated_at"]);continue
             notice.status="PROCESSING";notice.attempts+=1;notice.save(update_fields=["status","attempts","updated_at"])
         status,error,reference=send_notice(notice)

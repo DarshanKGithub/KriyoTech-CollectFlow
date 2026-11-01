@@ -128,7 +128,7 @@ class ConfigurationHelpers:
 
         # Create override
         override = config_service.set_feature_override(
-            tenant=tenant,
+            tenant_or_id=tenant,
             feature_key=feature_key,
             enabled=enabled,
             limit_value=limit_value,

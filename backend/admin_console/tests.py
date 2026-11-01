@@ -14,15 +14,18 @@ from accounts.models import Invitation, Membership
 from tenants.models import Tenant
 from .models import AdminAuditLog, AdminStaff, BillingInvoice, Payment, PaymentRefund, Plan, PlanFeature, RazorpayWebhookEvent, TenantFeatureOverride, Feature, Subscription, TenantUsage
 from .billing import verify_checkout_signature, verify_webhook_signature
+from django.core.cache import cache
+from .test_helpers import authenticate_staff
 
 
 class AdminConsoleTests(APITestCase):
     def setUp(self):
+        cache.clear()
         User = get_user_model()
         self.staff_user = User.objects.create_user(username="admin@kriyopay.test", email="admin@kriyopay.test", password="correct-horse-battery")
         self.staff = AdminStaff.objects.create(user=self.staff_user, role=AdminStaff.Role.SUPER_ADMIN)
         self.plan = Plan.objects.create(name="Starter", slug="starter", monthly_price=750000, trial_days=14)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {AccessToken.for_user(self.staff_user)}")
+        authenticate_staff(self.client, self.staff)
 
     def test_bootstrap_command_creates_one_high_entropy_super_admin_and_refuses_reuse(self):
         self.staff.delete()
@@ -50,7 +53,8 @@ class AdminConsoleTests(APITestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["account_type"], "ADMIN")
         self.assertEqual(response.data["admin_role"], AdminStaff.Role.SUPER_ADMIN)
-        self.assertIn("access", response.data)
+        self.assertTrue(response.data["mfa_required"])
+        self.assertNotIn("access", response.data)
 
     def test_shared_login_marks_company_member_as_workspace_account(self):
         user = get_user_model().objects.create_user(username="member@shared.test", email="member@shared.test", password="correct-horse-battery")
@@ -215,6 +219,33 @@ class AdminConsoleTests(APITestCase):
         row = TenantUsage.objects.get(tenant=tenant, metric="invoices_uploaded", period_start=timezone.localdate().replace(day=1))
         self.assertEqual(row.used_count, 1)
 
+    def test_invoice_quota_is_enforced_for_model_creation_and_zero_override(self):
+        from rest_framework.exceptions import PermissionDenied
+        from invoices.models import Invoice
+
+        tenant = Tenant.objects.create(name="Quota", workspace_key="quota-model")
+        self.plan.invoice_limit = 1
+        self.plan.save(update_fields=["invoice_limit"])
+        feature = Feature.objects.create(key="invoice_upload", name="Invoice upload")
+        PlanFeature.objects.create(plan=self.plan, feature=feature, enabled=True)
+        Subscription.objects.create(tenant=tenant, plan=self.plan, status=Subscription.Status.ACTIVE)
+
+        Invoice.objects.create(tenant=tenant)
+        with self.assertRaises(PermissionDenied):
+            Invoice.objects.create(tenant=tenant)
+        usage = TenantUsage.objects.get(tenant=tenant, metric="invoices_uploaded")
+        self.assertEqual(usage.used_count, 1)
+
+        zero_tenant = Tenant.objects.create(name="Zero quota", workspace_key="quota-zero")
+        Subscription.objects.create(tenant=zero_tenant, plan=self.plan, status=Subscription.Status.ACTIVE)
+        TenantFeatureOverride.objects.create(
+            tenant=zero_tenant, feature=feature, enabled=True, limit_value=0,
+            reason="No invoice uploads during setup",
+        )
+        with self.assertRaises(PermissionDenied):
+            Invoice.objects.create(tenant=zero_tenant)
+        self.assertFalse(TenantUsage.objects.filter(tenant=zero_tenant, metric="invoices_uploaded").exists())
+
     def test_razorpay_signatures_use_server_secrets(self):
         with override_settings(RAZORPAY_KEY_SECRET="unit-test-secret", RAZORPAY_WEBHOOK_SECRET="webhook-test-secret"):
             checkout = hmac.new(b"unit-test-secret", b"order_test|pay_test", hashlib.sha256).hexdigest()
@@ -355,6 +386,32 @@ class AdminConsoleTests(APITestCase):
         self.assertEqual(sub.current_period_end, original_end)
         self.assertEqual(payment.razorpay_payment_id, "pay_hook")
 
+    def test_order_paid_provider_read_runs_after_durable_claim_and_duplicate_worker_is_fenced(self):
+        from unittest.mock import patch
+        from .tasks import process_razorpay_webhook
+
+        tenant = Tenant.objects.create(name="Order paid", workspace_key="order-paid")
+        sub = Subscription.objects.create(tenant=tenant, plan=self.plan, status=Subscription.Status.TRIAL)
+        payment = Payment.objects.create(tenant=tenant, subscription=sub, requested_plan=self.plan, amount=750000,
+            currency="INR", razorpay_order_id="order_paid", billing_cycle=Subscription.Cycle.MONTHLY)
+        event = RazorpayWebhookEvent.objects.create(event_id="evt_order_paid", event_type="order.paid",
+            payload={"payload": {"order": {"entity": {"id": payment.razorpay_order_id}}}})
+        observed = {}
+
+        def fetch_order(_method, _path):
+            event.refresh_from_db()
+            observed["status_before_provider_read"] = event.status
+            observed["duplicate_result"] = process_razorpay_webhook.apply(args=[str(event.id)]).get()
+            return {"status": "paid", "amount_paid": payment.amount, "currency": payment.currency}
+
+        with patch("admin_console.tasks.razorpay_request", side_effect=fetch_order):
+            self.assertEqual(process_razorpay_webhook.apply(args=[str(event.id)]).get(), "processed")
+        self.assertEqual(observed["status_before_provider_read"], RazorpayWebhookEvent.Status.PROCESSING)
+        self.assertEqual(observed["duplicate_result"], "already processing")
+        sub.refresh_from_db(); event.refresh_from_db()
+        self.assertEqual(sub.status, Subscription.Status.ACTIVE)
+        self.assertEqual(event.status, RazorpayWebhookEvent.Status.PROCESSED)
+
     def test_offline_bank_payment_records_receipt_and_activates_plan(self):
         tenant = Tenant.objects.create(name="Acme", workspace_key="acme-offline")
         subscription = Subscription.objects.create(tenant=tenant, plan=self.plan, status=Subscription.Status.TRIAL)
@@ -383,6 +440,9 @@ class AdminConsoleTests(APITestCase):
         self.assertEqual(Payment.objects.get(pk=payment.pk).status, Payment.Status.PAID)
 
     def test_admin_mfa_setup_and_verification_lifecycle(self):
+        self.staff.mfa_enabled = False
+        self.staff.mfa_secret = ""
+        self.staff.save(update_fields=["mfa_enabled", "mfa_secret"])
         # 1. Login triggers MFA challenge for high-privilege roles (SUPER_ADMIN)
         response = self.client.post("/api/v1/admin/auth/login", {"email": self.staff_user.email, "password": "correct-horse-battery"}, format="json")
         self.assertEqual(response.status_code, 200, response.data)
@@ -394,9 +454,8 @@ class AdminConsoleTests(APITestCase):
         # Clear credentials for unauthenticated test requests before setup
         self.client.credentials()
 
-        # 2. Authenticate normally with token to setup MFA
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {AccessToken.for_user(self.staff_user)}")
-        setup_resp = self.client.post("/api/v1/admin/auth/mfa/setup", {}, format="json")
+        # 2. Enrollment uses the scoped challenge, never a password-only JWT.
+        setup_resp = self.client.post("/api/v1/admin/auth/mfa/setup", {"mfa_pending_token": pending_token}, format="json")
         self.assertEqual(setup_resp.status_code, 200, setup_resp.data)
         secret = setup_resp.data["secret"]
         self.assertIsNotNone(secret)
@@ -405,7 +464,7 @@ class AdminConsoleTests(APITestCase):
         from .totp import get_totp_token
         valid_code = get_totp_token(secret)
 
-        enable_resp = self.client.post("/api/v1/admin/auth/mfa/enable", {"code": valid_code}, format="json")
+        enable_resp = self.client.post("/api/v1/admin/auth/mfa/enable", {"code": valid_code, "mfa_pending_token": pending_token}, format="json")
         self.assertEqual(enable_resp.status_code, 200, enable_resp.data)
         self.staff.refresh_from_db()
         self.assertTrue(self.staff.mfa_enabled)

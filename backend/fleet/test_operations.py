@@ -13,7 +13,7 @@ from tenants.models import Tenant
 from audit.models import AuditLog
 from .models import (FleetCustomer,FleetDriver,FleetVehicle,FleetTrip,TransportOrder,
     FleetExceptionCase,FleetDock,DockAppointment,ReturnLoadOffer,ShipmentAccessLink,ShipmentNotice,
-    FleetTripLocation,FleetMaintenanceRecord)
+    FleetTripLocation,FleetMaintenanceRecord,FleetStopEpisode,FleetRouteSnapshot,FleetRouteProviderAttempt)
 
 
 @pytest.fixture
@@ -49,6 +49,19 @@ def test_exception_review_rejects_foreign_assignment_stale_decision_and_keeps_hi
     export=client.get("/api/v1/fleet/exceptions?export=csv")
     assert export.status_code==200
     assert "foreign" not in export.content.decode()
+
+
+def test_trip_edit_cannot_reassign_a_resource_used_by_an_active_trip(workspace):
+    tenant, user, client, customer, vehicle, driver, order, trip = workspace
+    other_vehicle = FleetVehicle.objects.create(tenant=tenant, registration_number="TEST456", normalized_registration="TEST456", capacity=10)
+    other_driver = FleetDriver.objects.create(tenant=tenant, name="Second Driver")
+    active = FleetTrip.objects.create(tenant=tenant, trip_number="T-2", vehicle=other_vehicle, driver=other_driver, status=FleetTrip.Status.DRAFT)
+    response = client.patch(f"/api/v1/fleet/trips/{trip.id}", {
+        "vehicle_id": str(other_vehicle.id), "driver_id": str(other_driver.id),
+    }, format="json")
+    assert response.status_code == 409, response.data
+    trip.refresh_from_db()
+    assert trip.vehicle_id == vehicle.id and trip.driver_id == driver.id
 
 
 def test_portal_is_scoped_revocable_and_hides_driver_and_gps(workspace):
@@ -152,11 +165,62 @@ def test_route_missing_configuration_and_stubbed_google_response(workspace,monke
     class FakeResponse:
         def __enter__(self):return self
         def __exit__(self,*args):return False
-        def read(self):return json.dumps({"routes":[{"duration":"600s","distanceMeters":10000}]}).encode()
+        def read(self):return json.dumps({"routes":[{"duration":"600s","distanceMeters":10000,"polyline":{"encodedPolyline":"???_ibE"}}]}).encode()
     with patch("fleet.routing.urlopen",return_value=FakeResponse()):
         result=refresh_route(trip)
-    assert result["status"]=="UPDATED",result
+    assert result["status"]=="UPDATED" and result["route_version"]==1,result
+    assert FleetRouteSnapshot.objects.filter(tenant=tenant,trip=trip).count()==1
     trip.refresh_from_db();assert trip.eta_source=="GOOGLE_TRAFFIC" and trip.route_distance_m==10000
+    history=client.get(f"/api/v1/fleet/trips/{trip.id}/eta-history")
+    assert history.status_code==200 and history.data["eta_source"]=="GOOGLE_TRAFFIC"
+    assert history.data["history"][0]["status"]=="UPDATED"
+
+
+def test_route_provider_budget_and_failure_circuit(workspace,monkeypatch):
+    from urllib.error import URLError
+    from .routing import refresh_route
+    tenant,user,client,customer,vehicle,driver,order,trip=workspace
+    tenant.settings={"fleet_controls":{"route_eta_enabled":True}};tenant.save()
+    trip.tenant=tenant;trip.status="IN_PROGRESS";trip.save()
+    FleetTripLocation.objects.create(tenant=tenant,trip=trip,reported_by=user,latitude=19.1,longitude=72.9,
+        accuracy_m=10,captured_at=timezone.now(),client_event_id=secrets.token_hex(16))
+    monkeypatch.setenv("GOOGLE_MAPS_ROUTES_API_KEY","test-only-key")
+    monkeypatch.setenv("GOOGLE_ROUTES_DAILY_REQUEST_BUDGET","10")
+    with patch("fleet.routing.urlopen",side_effect=URLError("quota")) as provider:
+        for _ in range(3):
+            FleetTrip.objects.filter(id=trip.id).update(route_attempted_at=timezone.now()-timedelta(minutes=2))
+            trip.refresh_from_db()
+            assert refresh_route(trip)["status"]=="PROVIDER_ERROR"
+        FleetTrip.objects.filter(id=trip.id).update(route_attempted_at=timezone.now()-timedelta(minutes=2))
+        trip.refresh_from_db()
+        blocked=refresh_route(trip)
+    assert blocked["status"]=="CIRCUIT_OPEN" and blocked["retry_after_seconds"]>0
+    assert provider.call_count==3
+    attempts=list(FleetRouteProviderAttempt.objects.filter(tenant=tenant).order_by("requested_at"))
+    assert len(attempts)==3 and all(row.status=="FAILED" for row in attempts)
+
+
+def test_route_provider_budget_stops_additional_calls(workspace,monkeypatch):
+    from .routing import refresh_route
+    tenant,user,client,customer,vehicle,driver,order,trip=workspace
+    tenant.settings={"fleet_controls":{"route_eta_enabled":True}};tenant.save()
+    trip.tenant=tenant;trip.status="IN_PROGRESS";trip.save()
+    FleetTripLocation.objects.create(tenant=tenant,trip=trip,reported_by=user,latitude=19.1,longitude=72.9,
+        accuracy_m=10,captured_at=timezone.now(),client_event_id=secrets.token_hex(16))
+    monkeypatch.setenv("GOOGLE_MAPS_ROUTES_API_KEY","test-only-key")
+    monkeypatch.setenv("GOOGLE_ROUTES_DAILY_REQUEST_BUDGET","1")
+    class FakeResponse:
+        def __enter__(self):return self
+        def __exit__(self,*args):return False
+        def read(self):return json.dumps({"routes":[{"duration":"600s","distanceMeters":10000}]}).encode()
+    with patch("fleet.routing.urlopen",return_value=FakeResponse()) as provider:
+        assert refresh_route(trip)["status"]=="UPDATED"
+        FleetTrip.objects.filter(id=trip.id).update(route_attempted_at=timezone.now()-timedelta(minutes=2))
+        trip.refresh_from_db()
+        result=refresh_route(trip)
+    assert result["status"]=="BUDGET_EXCEEDED" and result["retry_after_seconds"]>0
+    assert provider.call_count==1
+    assert FleetRouteProviderAttempt.objects.filter(tenant=tenant).count()==1
 
 
 def test_open_breakdown_blocks_assignment_and_return_to_service_unblocks(workspace):
@@ -260,16 +324,15 @@ def test_real_exception_evidence_collection_is_idempotent_and_assigns_an_owner(w
     assert not FleetExceptionCase.objects.filter(tenant=tenant,owner__isnull=True).exists()
 
 
-def test_stop_detection_uses_continuous_accurate_samples_and_cache_failure_is_optional(workspace,monkeypatch):
+def test_stop_detection_persists_continuous_accurate_samples(workspace):
     from types import SimpleNamespace
-    from .routing import record_motion,distance_to_path,cache
+    from .routing import record_motion,distance_to_path
     tenant,user,client,customer,vehicle,driver,order,trip=workspace
     start=timezone.now()-timedelta(minutes=16)
     for minute in range(17):
         record_motion(trip,SimpleNamespace(latitude=Decimal("19.1"),longitude=Decimal("72.9"),accuracy_m=Decimal("10"),captured_at=start+timedelta(minutes=minute)))
     assert FleetExceptionCase.objects.filter(tenant=tenant,category="PROLONGED_STOP").count()==1
+    episode=FleetStopEpisode.objects.get(tenant=tenant,trip=trip,ended_at__isnull=True)
+    assert episode.sample_count==17 and episode.exception_case.category=="PROLONGED_STOP"
     assert distance_to_path((0,0.5),[(0,0),(0,1)])<1
     assert distance_to_path((0.03,0.5),[(0,0),(0,1)])>2000
-    def unavailable(*args,**kwargs):raise OSError("Test cache outage")
-    monkeypatch.setattr(cache,"get",unavailable)
-    record_motion(trip,SimpleNamespace(latitude=19.1,longitude=72.9,accuracy_m=10,captured_at=timezone.now()))

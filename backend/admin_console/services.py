@@ -21,6 +21,9 @@ def models_q_expiry(now):
 
 
 def has_feature(tenant, key):
+    from accounts.workspace_access import workspace_features_available
+    if not workspace_features_available(tenant):
+        return False
     return entitlements_for(tenant)["features"].get(key, {}).get("enabled", False)
 
 

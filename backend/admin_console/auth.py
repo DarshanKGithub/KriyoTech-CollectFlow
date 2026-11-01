@@ -1,63 +1,59 @@
+import hashlib
+import secrets
+from collections.abc import Mapping
+from datetime import timedelta
+
+from django.contrib.auth.models import update_last_login
+from django.db import transaction
+from django.utils import timezone
+from django.utils.crypto import constant_time_compare
 from rest_framework.exceptions import AuthenticationFailed, ValidationError
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import AllowAny
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenObtainSerializer
+from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken
-from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
-from django.utils import timezone
-from .models import AdminAuditLog, AdminStaff
+from rest_framework_simplejwt.views import TokenObtainPairView
+
+from .mfa import credential_fingerprint, requires_mfa, verified_tokens
+from .models import AdminAuditLog, AdminMFAChallenge, AdminStaff
 from .totp import decrypt_secret, encrypt_secret, generate_totp_secret, get_totp_uri, verify_totp_token
-
-
-signer = TimestampSigner(salt="admin_mfa_pending")
 
 
 class AdminTokenSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         try:
-            data = super().validate(attrs)
+            # Authenticate without issuing usable tokens before the second factor.
+            TokenObtainSerializer.validate(self, attrs)
         except AuthenticationFailed:
             AdminAuditLog.objects.create(action="ADMIN_LOGIN_FAILED", metadata={"email": str(attrs.get("email", ""))[:254]})
             raise
-
-        staff = AdminStaff.objects.filter(user=self.user, is_active=True).first()
+        staff = AdminStaff.objects.select_related("user").filter(user=self.user, is_active=True).first()
         if not staff:
             AdminAuditLog.objects.create(actor=self.user, action="ADMIN_LOGIN_DENIED", metadata={"reason": "not_internal_staff"})
             raise AuthenticationFailed("This account is not an active KriyoPay internal staff account.")
+        return login_for_staff(staff)
 
-        is_high_privilege = staff.role in [AdminStaff.Role.SUPER_ADMIN, AdminStaff.Role.BILLING_ADMIN]
-        mfa_required = staff.mfa_enabled or staff.mfa_enforced or is_high_privilege
 
-        if mfa_required:
-            if not staff.mfa_enabled or not staff.mfa_secret:
-                # High privilege role without MFA set up must onboard MFA
-                staff.mfa_secret = encrypt_secret(generate_totp_secret())
-                staff.save(update_fields=["mfa_secret"])
-                pending_token = signer.sign(f"{self.user.id}:{staff.id}:setup")
-                return {
-                    "mfa_required": True,
-                    "mfa_setup_required": True,
-                    "mfa_pending_token": pending_token,
-                    "role": staff.role,
-                    "detail": "Two-factor authentication setup is required for your staff role."
-                }
-
-            pending_token = signer.sign(f"{self.user.id}:{staff.id}:auth")
-            return {
-                "mfa_required": True,
-                "mfa_pending_token": pending_token,
-                "role": staff.role,
-                "detail": "Two-factor authentication code required."
-            }
-
-        AdminAuditLog.objects.create(actor=self.user, actor_role=staff.role, action="ADMIN_LOGIN_SUCCEEDED")
-        data["role"] = staff.role
-        data["mfa_required"] = False
-        return data
+def login_for_staff(staff):
+    if requires_mfa(staff):
+        mode = "auth" if staff.mfa_enabled and staff.mfa_secret else "setup"
+        raw = secrets.token_urlsafe(32)
+        AdminMFAChallenge.objects.create(
+            staff=staff, token_hash=hashlib.sha256(raw.encode()).hexdigest(), mode=mode,
+            credential_fingerprint=credential_fingerprint(staff),
+            setup_secret=encrypt_secret(generate_totp_secret()) if mode == "setup" else "",
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+        return {"mfa_required": True, "mfa_setup_required": mode == "setup",
+                "mfa_pending_token": raw, "role": staff.role}
+    refresh = RefreshToken.for_user(staff.user)
+    if api_settings.UPDATE_LAST_LOGIN:
+        update_last_login(None, staff.user)
+    AdminAuditLog.objects.create(actor=staff.user, actor_role=staff.role, action="ADMIN_LOGIN_SUCCEEDED")
+    return {"access": str(refresh.access_token), "refresh": str(refresh), "role": staff.role, "mfa_required": False}
 
 
 class AdminLoginView(TokenObtainPairView):
@@ -66,94 +62,83 @@ class AdminLoginView(TokenObtainPairView):
     throttle_scope = "admin_login"
 
 
-class AdminMFAVerifyView(APIView):
-    # MFA verification is the second login step, so no JWT exists yet. The
-    # signed, short-lived pending token in the request body is the credential.
+class AdminMFABase(APIView):
+    authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "admin_login"
+    throttle_scope = "admin_mfa"
 
-    def post(self, request):
-        pending_token = request.data.get("mfa_pending_token")
-        code = request.data.get("code")
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if not isinstance(request.data, Mapping):
+            raise ValidationError("Send an object with named fields.")
 
-        if not pending_token or not code:
-            raise ValidationError({"detail": "mfa_pending_token and code are required."})
+    def get_authenticate_header(self, request):
+        return "MFA"
 
-        try:
-            # Valid for 300 seconds (5 minutes)
-            unsigned_data = signer.unsign(pending_token, max_age=300)
-            user_id, staff_id, mode = unsigned_data.split(":")
-        except SignatureExpired:
-            raise AuthenticationFailed("2FA verification session expired. Please sign in again.")
-        except (BadSignature, ValueError):
-            raise AuthenticationFailed("Invalid 2FA verification token.")
+    def finalize_response(self, request, response, *args, **kwargs):
+        response = super().finalize_response(request, response, *args, **kwargs)
+        response["Cache-Control"] = "no-store"
+        return response
 
-        staff = AdminStaff.objects.filter(id=staff_id, user_id=user_id, is_active=True).first()
-        if not staff:
-            raise AuthenticationFailed("Account or staff assignment invalid.")
-        if mode != "auth" or not staff.mfa_enabled or not staff.mfa_secret:
-            raise AuthenticationFailed("Two-factor authentication is not enabled for this account. Sign in again to finish setup.")
+    def challenge(self, request, mode):
+        raw = request.data.get("mfa_pending_token")
+        if not isinstance(raw, str) or not 1 <= len(raw) <= 256:
+            raise ValidationError({"detail": "A valid mfa_pending_token is required."})
+        challenge = AdminMFAChallenge.objects.select_for_update().filter(
+            token_hash=hashlib.sha256(raw.encode()).hexdigest(), mode=mode,
+            consumed_at__isnull=True, expires_at__gt=timezone.now(), attempts__lt=5,
+        ).first()
+        if not challenge:
+            raise AuthenticationFailed("MFA challenge is invalid, expired or already used. Sign in again.")
+        staff = AdminStaff.objects.select_for_update(of=("self",)).select_related("user").filter(
+            pk=challenge.staff_id, is_active=True, user__is_active=True,
+        ).first()
+        if not staff or not constant_time_compare(challenge.credential_fingerprint, credential_fingerprint(staff)):
+            raise AuthenticationFailed("Account credentials changed. Sign in again.")
+        if (mode == "setup" and staff.mfa_enabled) or (mode == "auth" and not staff.mfa_enabled):
+            raise AuthenticationFailed("MFA configuration changed. Sign in again.")
+        return challenge, staff
 
-        raw_secret = decrypt_secret(staff.mfa_secret) if staff.mfa_secret else ""
-        if not verify_totp_token(raw_secret, code):
-            AdminAuditLog.objects.create(
-                actor=staff.user,
-                actor_role=staff.role,
-                action="ADMIN_MFA_VERIFICATION_FAILED"
-            )
-            raise AuthenticationFailed("Invalid two-factor authentication code.")
-
-        staff.mfa_last_verified_at = timezone.now()
-        staff.save(update_fields=["mfa_last_verified_at"])
-
-        refresh = RefreshToken.for_user(staff.user)
-        AdminAuditLog.objects.create(
-            actor=staff.user,
-            actor_role=staff.role,
-            action="ADMIN_LOGIN_SUCCEEDED_MFA"
-        )
-        return Response({"access": str(refresh.access_token), "refresh": str(refresh), "role": staff.role, "mfa_required": False})
-
-
-class AdminMFASetupView(APIView):
-    def post(self, request):
-        staff = AdminStaff.objects.filter(user=request.user, is_active=True).first()
-        if not staff:
-            raise AuthenticationFailed("Staff profile required.")
-
-        if staff.mfa_enabled:
-            return Response({"detail": "2FA already enabled."}, status=status.HTTP_400_BAD_REQUEST)
-
-        secret = decrypt_secret(staff.mfa_secret) if staff.mfa_secret else generate_totp_secret()
-        if not staff.mfa_secret:
-            staff.mfa_secret = encrypt_secret(secret)
-            staff.save(update_fields=["mfa_secret"])
-
-        return Response({
-            "secret": secret,
-            "uri": get_totp_uri(secret, request.user.email)
-        })
-
-
-class AdminMFAEnableView(APIView):
-    def post(self, request):
-        code = request.data.get("code")
-        staff = AdminStaff.objects.filter(user=request.user, is_active=True).first()
-
-        if not staff or not staff.mfa_secret:
-            raise ValidationError({"detail": "2FA setup not initiated."})
-
-        raw_secret = decrypt_secret(staff.mfa_secret)
-        if not verify_totp_token(raw_secret, code):
-            raise ValidationError({"detail": "Invalid verification code."})
-
+    def complete(self, request, mode):
+        challenge, staff = self.challenge(request, mode)
+        secret = decrypt_secret(challenge.setup_secret if mode == "setup" else staff.mfa_secret)
+        challenge.attempts += 1
+        if not verify_totp_token(secret, request.data.get("code")):
+            challenge.save(update_fields=["attempts"])
+            AdminAuditLog.objects.create(actor=staff.user, actor_role=staff.role, action="ADMIN_MFA_VERIFICATION_FAILED")
+            # Return inside the transaction so the failed-attempt counter commits.
+            return Response({"detail": "Invalid two-factor authentication code."}, status=401)
+        challenge.consumed_at = timezone.now()
+        challenge.setup_secret = ""
+        challenge.save(update_fields=["attempts", "consumed_at", "setup_secret"])
         staff.mfa_enabled = True
         staff.mfa_last_verified_at = timezone.now()
-        staff.save(update_fields=["mfa_enabled", "mfa_last_verified_at"])
+        staff.mfa_secret = encrypt_secret(secret)
+        staff.save(update_fields=["mfa_enabled", "mfa_last_verified_at", "mfa_secret"])
+        if api_settings.UPDATE_LAST_LOGIN:
+            update_last_login(None, staff.user)
+        AdminAuditLog.objects.create(actor=staff.user, actor_role=staff.role,
+                                     action="ADMIN_MFA_ENABLED" if mode == "setup" else "ADMIN_LOGIN_SUCCEEDED_MFA")
+        return Response(verified_tokens(staff))
 
-        AdminAuditLog.objects.create(
-            actor=staff.user, actor_role=staff.role, action="ADMIN_MFA_ENABLED"
-        )
-        return Response({"detail": "2FA enabled successfully."})
 
+class AdminMFAVerifyView(AdminMFABase):
+    @transaction.atomic
+    def post(self, request):
+        return self.complete(request, "auth")
+
+
+class AdminMFASetupView(AdminMFABase):
+    @transaction.atomic
+    def post(self, request):
+        challenge, staff = self.challenge(request, "setup")
+        secret = decrypt_secret(challenge.setup_secret)
+        return Response({"secret": secret, "uri": get_totp_uri(secret, staff.user.email)},
+                        headers={"Cache-Control": "no-store"})
+
+
+class AdminMFAEnableView(AdminMFABase):
+    @transaction.atomic
+    def post(self, request):
+        return self.complete(request, "setup")

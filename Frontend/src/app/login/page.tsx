@@ -45,12 +45,12 @@ export default function LoginPage() {
             }
             const data = await response.json();
             if (data.account_type === "ADMIN") {
-                const adminResponse = await fetch(`${API_URL}/admin/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: form.get("email"), password: form.get("password") }) });
-                const adminData = await adminResponse.json().catch(() => ({}));
-                if (!adminResponse.ok) throw new Error(adminData.detail || "Could not verify Super Admin access. Please sign in again.");
+                const adminData = data;
                 localStorage.removeItem("kriyopay_workspace");
                 if (adminData.mfa_setup_required || adminData.mfa_required) {
-                    sessionStorage.setItem("kriyopay_admin_mfa", JSON.stringify({ mode: adminData.mfa_setup_required ? "setup" : "verify", pendingToken: adminData.mfa_pending_token, access: data.access, refresh: data.refresh, role: adminData.role }));
+                    localStorage.removeItem("kriyopay_access");
+                    localStorage.removeItem("kriyopay_refresh");
+                    sessionStorage.setItem("kriyopay_admin_mfa", JSON.stringify({ mode: adminData.mfa_setup_required ? "setup" : "verify", pendingToken: adminData.mfa_pending_token, role: adminData.role }));
                     window.location.assign("/admin-mfa");
                     return;
                 }

@@ -1,5 +1,6 @@
 import uuid
 from django.contrib.auth.models import AbstractUser
+from django.core.exceptions import ValidationError
 from django.db import models
 from tenants.models import Tenant, Branch
 
@@ -31,6 +32,14 @@ class BranchMembership(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=["membership", "branch"], name="uniq_membership_branch")]
         indexes = [models.Index(fields=["membership", "is_active"])]
+
+    def save(self, *args, **kwargs):
+        if self.membership_id and self.branch_id:
+            membership_tenant_id = Membership.objects.filter(pk=self.membership_id).values_list("tenant_id", flat=True).first()
+            branch_tenant_id = Branch.objects.filter(pk=self.branch_id).values_list("tenant_id", flat=True).first()
+            if membership_tenant_id is None or branch_tenant_id is None or membership_tenant_id != branch_tenant_id:
+                raise ValidationError("A branch assignment must use a branch in the membership's workspace.")
+        super().save(*args, **kwargs)
 
 class Invitation(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

@@ -71,16 +71,17 @@ class PublicShipment(APIView):
     authentication_classes=[]
     permission_classes=[AllowAny]
     throttle_classes=[ShipmentThrottle]
-    def link(self,token):
+    def link(self,token,method="GET"):
         from .access import fleet_enabled
+        from accounts.workspace_access import workspace_access_denial
         link=ShipmentAccessLink.objects.filter(token_hash=hashlib.sha256(token.encode()).hexdigest(),expires_at__gt=timezone.now(),revoked_at__isnull=True,tenant__is_deleted=False).select_related("tenant","trip__transport_order__customer","trip__delivery_proof").first()
-        return link if link and fleet_enabled(link.tenant) else None
+        return link if link and not workspace_access_denial(link.tenant,method=method) and fleet_enabled(link.tenant) else None
     def finalize_response(self,request,response,*args,**kwargs):
         response=super().finalize_response(request,response,*args,**kwargs)
         response["Cache-Control"]="no-store";response["Referrer-Policy"]="no-referrer";response["X-Robots-Tag"]="noindex, nofollow"
         return response
     def get(self,request,token,download=None):
-        link=self.link(token)
+        link=self.link(token,request.method)
         if not link:return Response({"error":"This shipment link has expired or was revoked."},status=404)
         trip=link.trip;order=trip.transport_order
         if not order:return Response({"error":"Shipment unavailable."},status=404)
@@ -103,7 +104,7 @@ class PublicShipment(APIView):
             "issues":[{"reference":str(i.id),"status":i.status,"description":i.evidence.get("message"),"resolution":i.public_resolution,"created_at":i.created_at.isoformat()} for i in issues]})
     def post(self,request,token,download=None):
         if download:return Response({"error":"Downloads do not accept issue submissions."},status=405)
-        link=self.link(token)
+        link=self.link(token,request.method)
         if not link:return Response({"error":"This shipment link has expired or was revoked."},status=404)
         if request.data.get("action")=="unsubscribe":
             same_shipment=ShipmentAccessLink.objects.filter(tenant=link.tenant,trip=link.trip)
