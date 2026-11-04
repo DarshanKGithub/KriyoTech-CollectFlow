@@ -59,6 +59,11 @@ type Line = {
     description: string;
     amount: string;
     budgeted_amount?: string | null;
+    quantity_litres?: string | null;
+    fuel_fill_type?: "UNKNOWN" | "FULL" | "PARTIAL";
+    odometer_km?: string | null;
+    incurred_at?: string | null;
+    payment_reference?: string;
     category?: string;
     status: string;
     receipt_name?: string | null;
@@ -215,6 +220,7 @@ export default function FleetPage() {
     const [message, setMessage] = useState("");
     const [alertsError, setAlertsError] = useState("");
     const [busy, setBusy] = useState(false);
+    const [correctingFuel, setCorrectingFuel] = useState<string | null>(null);
     const idempotencyKeys = useRef(new WeakMap<HTMLFormElement, string>());
     const refresh = useCallback(async () => {
         const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
@@ -368,6 +374,10 @@ export default function FleetPage() {
         const data: Record<string, FormDataEntryValue> = Object.fromEntries(form.entries());
         if (data.quantity_litres === "")
             delete data.quantity_litres;
+        if (data.odometer_km === "")
+            delete data.odometer_km;
+        if (data.incurred_at === "")
+            delete data.incurred_at;
         if (kind === "expenses") {
             const key = idempotencyKeys.current.get(formElement) || crypto.randomUUID();
             idempotencyKeys.current.set(formElement, key);
@@ -398,6 +408,22 @@ export default function FleetPage() {
         finally {
             setBusy(false);
         }
+    }
+    async function correctFuelLine(event: FormEvent<HTMLFormElement>, trip: Trip, line: Line) {
+        event.preventDefault();
+        setBusy(true);
+        const formElement = event.currentTarget;
+        const data: Record<string, FormDataEntryValue> = Object.fromEntries(new FormData(formElement).entries());
+        for (const field of ["quantity_litres", "odometer_km", "incurred_at", "budgeted_amount"])
+            if (data[field] === "") delete data[field];
+        try {
+            await send(`/fleet/trips/${trip.id}/expenses/${line.id}`, "PATCH", data);
+            setCorrectingFuel(null);
+            await refresh();
+            setMessage("Fuel entry corrected and returned to draft review. Its correction is recorded in the audit history.");
+        } catch (error) {
+            setMessage(error instanceof Error ? error.message : "Could not correct this fuel entry.");
+        } finally { setBusy(false); }
     }
     async function createSalaryRecord(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -619,9 +645,9 @@ export default function FleetPage() {
       <UiText className="mt-3 text-xs text-slate-500">Totals above include approved actual amounts only. Pending items are listed below.</UiText>
       {(trip.status === "DRAFT" || trip.status === "IN_PROGRESS" || trip.status === "COMPLETED" || trip.status === "REJECTED") && <UiBox className="mt-4 grid gap-3 border-t border-line pt-4 lg:grid-cols-2">
         <UiForm className="flex flex-wrap gap-2" onSubmit={e => void addLine(e, trip, "revenue")}><UiInput className={`${inputClass} min-w-24 flex-1`} name="description" placeholder="Income description (e.g. freight charge)" required/><UiInput className="w-28 rounded-lg border border-line px-3 py-2 text-sm" name="amount" type="number" min="0.01" step="0.01" placeholder="₹ amount" required/><UiButton disabled={busy} className="rounded-lg border border-line px-3 py-2 text-xs font-semibold disabled:opacity-50">Add income</UiButton></UiForm>
-        <UiForm className="grid gap-2 sm:grid-cols-[1fr_110px_115px_1fr_110px_1fr_auto]" onSubmit={e => void addLine(e, trip, "expenses")}><UiInput className={inputClass} name="description" placeholder="Cost description (e.g. diesel)" required/><UiInput className={inputClass} name="amount" type="number" min="0.01" step="0.01" placeholder="₹ actual" required/><UiSelect className={inputClass} name="category" aria-label="Cost category"><option value="FUEL">Fuel</option><option value="TOLL">Toll</option><option value="LOADING">Loading</option><option value="REPAIR">Repair</option><option value="OTHER">Other</option></UiSelect><UiInput className={inputClass} name="budgeted_amount" type="number" min="0" step="0.01" placeholder="₹ budget (optional)" aria-label="Planned cost budget"/><UiInput className={inputClass} name="quantity_litres" type="number" min="0.01" step="0.01" placeholder="Fuel litres" aria-label="Fuel litres for efficiency monitoring"/><UiLabel className="flex items-center text-xs text-slate-500">Receipt<UiInput className="ml-2 w-32 text-xs" name="receipt_file" type="file" accept="application/pdf,image/jpeg,image/png,image/heic" aria-label="Attach cost receipt"/></UiLabel><UiButton disabled={busy} className="rounded-lg border border-line px-3 py-2 text-xs font-semibold disabled:opacity-50">Add cost</UiButton></UiForm>
+        <UiForm className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4" onSubmit={e => void addLine(e, trip, "expenses")}><UiInput className={inputClass} name="description" placeholder="Cost description (e.g. diesel)" required/><UiInput className={inputClass} name="amount" type="number" min="0.01" step="0.01" placeholder="₹ actual" required/><UiSelect className={inputClass} name="category" aria-label="Cost category"><option value="FUEL">Fuel</option><option value="TOLL">Toll</option><option value="LOADING">Loading</option><option value="REPAIR">Repair</option><option value="OTHER">Other</option></UiSelect><UiInput className={inputClass} name="budgeted_amount" type="number" min="0" step="0.01" placeholder="₹ budget (optional)" aria-label="Planned cost budget"/><UiInput className={inputClass} name="quantity_litres" type="number" min="0.01" step="0.01" placeholder="Fuel litres" aria-label="Fuel litres for efficiency monitoring"/><UiSelect className={inputClass} name="fuel_fill_type" aria-label="Fuel fill type"><option value="UNKNOWN">Fill type not recorded</option><option value="FULL">Full tank</option><option value="PARTIAL">Partial fill</option></UiSelect><UiInput className={inputClass} name="odometer_km" type="number" min="0" step="0.1" placeholder="Fill odometer (km)" aria-label="Odometer at fuel fill"/><UiInput className={inputClass} name="incurred_at" type="date" aria-label="Fuel fill date"/><UiInput className={inputClass} name="payment_reference" placeholder="Receipt / transaction ref" aria-label="Fuel transaction reference"/><UiLabel className="flex items-center text-xs text-slate-500">Receipt<UiInput className="ml-2 w-32 text-xs" name="receipt_file" type="file" accept="application/pdf,image/jpeg,image/png,image/heic" aria-label="Attach cost receipt"/></UiLabel><UiButton disabled={busy} className="rounded-lg border border-line px-3 py-2 text-xs font-semibold disabled:opacity-50">Add cost</UiButton></UiForm>
       </UiBox>}
-      {(trip.revenue_lines.length > 0 || trip.expense_lines.length > 0) && <UiBox className="mt-4 grid gap-4 border-t border-line pt-3 text-xs sm:grid-cols-2"><UiBox><UiStrong className="text-slate-500">Income</UiStrong>{trip.revenue_lines.map(line => <UiText key={line.id} className="mt-1 flex justify-between gap-2"><UiSpan>{line.description} · {lineStatusLabel[line.status] || line.status.toLowerCase()}</UiSpan><UiSpan>₹{line.amount}</UiSpan></UiText>)}</UiBox><UiBox><UiStrong className="text-slate-500">Costs</UiStrong>{trip.expense_lines.map(line => <UiText key={line.id} className="mt-1 flex justify-between gap-2"><UiSpan>{line.category} · {line.description} · {line.receipt_name || "Receipt missing"} · {lineStatusLabel[line.status] || line.status.toLowerCase()}{line.budgeted_amount !== null && line.budgeted_amount !== undefined && <> · Budget ₹{line.budgeted_amount}{Number(line.amount) > Number(line.budgeted_amount) && <UiStrong className="text-rose-700"> · Over budget ₹{(Number(line.amount) - Number(line.budgeted_amount)).toFixed(2)}</UiStrong>}</>}</UiSpan><UiSpan>₹{line.amount}</UiSpan></UiText>)}</UiBox></UiBox>}
+      {(trip.revenue_lines.length > 0 || trip.expense_lines.length > 0) && <UiBox className="mt-4 grid gap-4 border-t border-line pt-3 text-xs sm:grid-cols-2"><UiBox><UiStrong className="text-slate-500">Income</UiStrong>{trip.revenue_lines.map(line => <UiText key={line.id} className="mt-1 flex justify-between gap-2"><UiSpan>{line.description} · {lineStatusLabel[line.status] || line.status.toLowerCase()}</UiSpan><UiSpan>₹{line.amount}</UiSpan></UiText>)}</UiBox><UiBox><UiStrong className="text-slate-500">Costs</UiStrong>{trip.expense_lines.map(line => <UiBox key={line.id} className="mt-2 rounded-lg border border-line p-2"><UiText className="flex justify-between gap-2"><UiSpan>{line.category} · {line.description} · {line.receipt_name || "Receipt missing"} · {lineStatusLabel[line.status] || line.status.toLowerCase()}{line.category === "FUEL" && line.fuel_fill_type && <> · {line.fuel_fill_type.toLowerCase()} fill · {line.quantity_litres || "—"} L · {line.odometer_km || "—"} km · Ref {line.payment_reference || "—"}</>}{line.budgeted_amount !== null && line.budgeted_amount !== undefined && <> · Budget ₹{line.budgeted_amount}{Number(line.amount) > Number(line.budgeted_amount) && <UiStrong className="text-rose-700"> · Over budget ₹{(Number(line.amount) - Number(line.budgeted_amount)).toFixed(2)}</UiStrong>}</>}</UiSpan><UiSpan>₹{line.amount}</UiSpan></UiText>{line.category === "FUEL" && <UiButton type="button" onClick={() => setCorrectingFuel(correctingFuel === line.id ? null : line.id)} className="mt-1 rounded-md border border-line px-2 py-1 text-[10px] font-semibold">{correctingFuel === line.id ? "Close correction" : "Correct fuel entry"}</UiButton>}{correctingFuel === line.id && <UiForm className="mt-2 grid gap-2 sm:grid-cols-2" onSubmit={event => void correctFuelLine(event, trip, line)}><UiInput className={inputClass} name="description" defaultValue={line.description} aria-label="Fuel description" required/><UiInput className={inputClass} name="amount" type="number" min="0.01" step="0.01" defaultValue={line.amount} aria-label="Fuel cost" required/><UiInput className={inputClass} name="quantity_litres" type="number" min="0.01" step="0.01" defaultValue={line.quantity_litres || ""} aria-label="Fuel litres" placeholder="Litres"/><UiSelect className={inputClass} name="fuel_fill_type" defaultValue={line.fuel_fill_type || "UNKNOWN"} aria-label="Fuel fill type"><option value="UNKNOWN">Type unknown</option><option value="FULL">Full tank</option><option value="PARTIAL">Partial fill</option></UiSelect><UiInput className={inputClass} name="odometer_km" type="number" min="0" step="0.1" defaultValue={line.odometer_km || ""} aria-label="Odometer at fill" placeholder="Fill odometer (km)"/><UiInput className={inputClass} name="incurred_at" type="date" defaultValue={line.incurred_at || ""} aria-label="Fill date"/><UiInput className={inputClass} name="payment_reference" defaultValue={line.payment_reference || ""} aria-label="Receipt / transaction reference" placeholder="Receipt / transaction ref"/><UiInput className={`${inputClass} sm:col-span-2`} name="reason" minLength={8} maxLength={500} placeholder="Correction reason (required)" required/><UiButton disabled={busy} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white sm:col-span-2">{busy ? "Saving correction…" : "Save correction for review"}</UiButton></UiForm>}</UiBox>)}</UiBox></UiBox>}
       <UiBox className="mt-4 flex flex-wrap gap-2">{trip.status === "DRAFT" && <UiButton onClick={() => void tripAction(trip, "start")} className="rounded-lg border border-line px-3 py-2 text-xs font-semibold">Check in at pickup</UiButton>}{trip.status === "IN_PROGRESS" && <>{!trip.loaded_at && <UiButton onClick={() => void tripAction(trip, "load")} className="rounded-lg border border-line px-3 py-2 text-xs font-semibold">Confirm load</UiButton>}<UiButton onClick={() => void tripAction(trip, "complete")} className="rounded-lg bg-forest px-3 py-2 text-xs font-semibold text-white">Complete trip</UiButton></>}{["DRAFT", "IN_PROGRESS", "COMPLETED", "REJECTED"].includes(trip.status) && <UiButton onClick={() => void tripAction(trip, "submit")} className="rounded-lg bg-forest px-3 py-2 text-xs font-semibold text-white">Send trip for review</UiButton>}{trip.status === "SUBMITTED" && <><UiButton onClick={() => void tripAction(trip, "approve")} className="rounded-lg bg-forest px-3 py-2 text-xs font-semibold text-white">Approve trip</UiButton><UiButton onClick={() => void tripAction(trip, "reject")} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700">Request changes</UiButton></>}</UiBox>
     </UiArticle>)}{tripPage.controls}</CollectionExplorer>{trips.length === 0 && <UiBox className={`${cardClass} text-sm text-slate-500`}>{Object.values(filters).some(Boolean) ? "No trips match these filters. Clear filters or try a different search." : "No trips yet. Add a truck and driver above, then create your first trip."}</UiBox>}</UiBox></UiSection>
     </>}

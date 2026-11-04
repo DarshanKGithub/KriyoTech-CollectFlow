@@ -179,8 +179,8 @@ class TripExpenseLineSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TripExpenseLine
-        fields = ["id", "category", "description", "amount", "budgeted_amount", "quantity_litres", "incurred_at", "payee", "payment_reference", "paid_by_driver", "idempotency_key", "receipt_id", "receipt_name", "is_estimated", "status", "created_at"]
-        read_only_fields = ["id", "status", "created_at", "receipt_name"]
+        fields = ["id", "category", "description", "amount", "is_refund", "budgeted_amount", "quantity_litres", "fuel_fill_type", "odometer_km", "incurred_at", "payee", "payment_reference", "paid_by_driver", "idempotency_key", "receipt_id", "receipt_name", "is_estimated", "status", "created_at"]
+        read_only_fields = ["id", "status", "created_at", "receipt_name", "is_refund"]
         extra_kwargs = {"idempotency_key": {"write_only": True, "required": False}}
 
     def validate_amount(self, value):
@@ -193,7 +193,24 @@ class TripExpenseLineSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Fuel quantity must be greater than zero litres.")
         return value
 
+    def validate_odometer_km(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError("Fill odometer must be non-negative.")
+        return value
+
     def validate(self, attrs):
+        category = attrs.get("category", getattr(self.instance, "category", TripExpenseLine.Category.OTHER))
+        fill_type = attrs.get("fuel_fill_type", getattr(self.instance, "fuel_fill_type", TripExpenseLine.FuelFillType.UNKNOWN))
+        if category != TripExpenseLine.Category.FUEL and fill_type != TripExpenseLine.FuelFillType.UNKNOWN:
+            raise serializers.ValidationError({"fuel_fill_type": "Fill type can only be set for a fuel expense."})
+        if fill_type in {TripExpenseLine.FuelFillType.FULL, TripExpenseLine.FuelFillType.PARTIAL}:
+            quantity = attrs.get("quantity_litres", getattr(self.instance, "quantity_litres", None))
+            odometer = attrs.get("odometer_km", getattr(self.instance, "odometer_km", None))
+            incurred_at = attrs.get("incurred_at", getattr(self.instance, "incurred_at", None))
+            if category != TripExpenseLine.Category.FUEL:
+                raise serializers.ValidationError({"fuel_fill_type": "Fill type can only be set for a fuel expense."})
+            if quantity is None or odometer is None or incurred_at is None:
+                raise serializers.ValidationError("A full or partial fill needs litres, fill odometer, and fill date to support interval calculations.")
         receipt_id = attrs.pop("receipt_id", None)
         if receipt_id:
             tenant = self.context["tenant"]

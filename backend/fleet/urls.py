@@ -3,7 +3,7 @@ from .exceptions import FleetExceptions, FleetExceptionDetail
 from .routing import RouteEtaHistory, RouteIntegration
 from .shipment_portal import ShipmentLinks, PublicShipment
 from .customer_notifications import CustomerNotificationStatus, WhatsAppDeliveryWebhook
-from .operations import DockDetentionAction, MaintenanceReliability, MaintenanceReturnToService, ReturnLoadHistory, ReturnLoadCancel
+from .operations import DockDetentionAction, FuelManagement, MaintenanceReliability, MaintenanceReturnToService, ReturnLoadHistory, ReturnLoadCancel
 from .geofence_views import FleetGeofenceDetail, FleetGeofenceEvents, FleetGeofences
 from .gps_providers import FleetGpsDeviceDetail, FleetGpsDevices, FleetGpsProviderIntake
 from .dispatch import FleetDispatchRecommendations
@@ -30,6 +30,7 @@ urlpatterns = [
     path("public/shipment/<str:token>", PublicShipment.as_view()),
     path("public/shipment/<str:token>/<str:download>", PublicShipment.as_view()),
     path("reliability", MaintenanceReliability.as_view()),
+    path("fuel", FuelManagement.as_view()),
     path("maintenance/<uuid:record_id>/return-to-service", MaintenanceReturnToService.as_view()),
     path("detention/<uuid:appointment_id>/<str:action>", DockDetentionAction.as_view()),
     path("booking-history", ReturnLoadHistory.as_view()),

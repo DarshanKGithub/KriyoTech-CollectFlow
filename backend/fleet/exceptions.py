@@ -24,8 +24,10 @@ def sync_cases(request):
     from .models import DockAppointment
     from .operations import MaintenanceReliability
     alerts = FleetAlerts().get(request).data.get("alerts", [])
-    from .anomalies import contextual_fuel_alerts
+    from .anomalies import contextual_fuel_alerts, full_fill_consumption_alerts, fuel_budget_alerts
     alerts.extend(contextual_fuel_alerts(request.tenant))
+    alerts.extend(full_fill_consumption_alerts(request.tenant))
+    alerts.extend(fuel_budget_alerts(request.tenant))
     leakage = FleetRevenueLeakage().get(request).data.get("items", [])
     for appointment in DockAppointment.objects.filter(tenant=request.tenant, status__in=["ARRIVED", "LOADING"]).select_related("tenant", "dock", "order__customer"):
         evidence = dock_appointment_data(appointment)

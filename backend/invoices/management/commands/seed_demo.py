@@ -23,6 +23,9 @@ from fleet.models import (
     FleetDock,
     FleetDriver,
     FleetExceptionCase,
+    FleetFuelBudget,
+    FreightImportBatch,
+    FreightImportRow,
     FleetFollowUp,
     FleetGeofence,
     FleetGeofenceEvent,
@@ -317,6 +320,72 @@ class Command(BaseCommand):
                     "status": expense_status, "created_by": owner,
                 })
 
+        # Synthetic full/partial fuel fills create a repeatable, explicitly simulated card-feed demo.
+        demo_fuel_trips = []
+        demo_fuel_lines = []
+        fuel_history = [(35, Decimal("110000"), Decimal("100")), (28, Decimal("111000"), Decimal("100")),
+            (21, Decimal("112000"), Decimal("100")), (14, Decimal("113000"), Decimal("100")),
+            (7, Decimal("114000"), Decimal("190"))]
+        for index, (days_ago, odometer, litres) in enumerate(fuel_history, 1):
+            delivery_at = now - timedelta(days=days_ago)
+            trip, _ = FleetTrip.objects.get_or_create(tenant=tenant, trip_number=f"KP-DEMO-FUEL-{index:03}", defaults={
+                "vehicle": vehicles[0], "driver": drivers[0], "origin": "Bengaluru, KA", "destination": "Chennai, TN",
+                "starts_at": delivery_at - timedelta(hours=8), "pickup_at": delivery_at - timedelta(hours=8),
+                "loaded_at": delivery_at - timedelta(hours=7), "ends_at": delivery_at, "delivery_at": delivery_at,
+                "odometer_start": odometer - Decimal("1000"), "odometer_end": odometer,
+                "status": FleetTrip.Status.APPROVED, "submitted_by": owner, "submitted_at": delivery_at,
+                "reviewed_by": owner, "reviewed_at": delivery_at + timedelta(minutes=5),
+                "review_note": "Synthetic demo history for full-to-full fuel analysis.", "created_by": owner,
+            })
+            demo_fuel_trips.append(trip)
+            reference = f"DEMO-FCARD-{index:03}"
+            key = uuid.uuid5(uuid.NAMESPACE_URL, f"kriyo-demo-fuel-card-{reference}")
+            line, _ = TripExpenseLine.objects.get_or_create(tenant=tenant, idempotency_key=key, defaults={
+                "trip": trip, "category": TripExpenseLine.Category.FUEL,
+                "description": "SIMULATION · synthetic fuel-card full fill", "amount": (litres * Decimal("90")).quantize(Decimal("0.01")),
+                "quantity_litres": litres, "fuel_fill_type": TripExpenseLine.FuelFillType.FULL,
+                "odometer_km": odometer, "incurred_at": today - timedelta(days=days_ago),
+                "payee": "SIMULATED DEMO FUEL CARD", "payment_reference": reference,
+                "status": TripExpenseLine.ReviewStatus.APPROVED, "created_by": owner,
+            })
+            demo_fuel_lines.append(line)
+        partial_date = today - timedelta(days=17)
+        partial_reference = "DEMO-FCARD-PARTIAL-001"
+        partial_key = uuid.uuid5(uuid.NAMESPACE_URL, f"kriyo-demo-fuel-card-{partial_reference}")
+        partial_line, _ = TripExpenseLine.objects.get_or_create(tenant=tenant, idempotency_key=partial_key, defaults={
+            "trip": demo_fuel_trips[2], "category": TripExpenseLine.Category.FUEL,
+            "description": "SIMULATION · synthetic fuel-card partial fill", "amount": Decimal("3600.00"),
+            "quantity_litres": Decimal("40"), "fuel_fill_type": TripExpenseLine.FuelFillType.PARTIAL,
+            "odometer_km": Decimal("112400"), "incurred_at": partial_date,
+            "payee": "SIMULATED DEMO FUEL CARD", "payment_reference": partial_reference,
+            "status": TripExpenseLine.ReviewStatus.APPROVED, "created_by": owner,
+        })
+        import_digest = hashlib.sha256(f"simulated-fuel-card-demo-v1:{tenant.id}".encode()).hexdigest()
+        batch, _ = FreightImportBatch.objects.get_or_create(tenant=tenant, checksum_sha256=import_digest, defaults={
+            "filename": "DEMO_SIMULATED_FUEL_CARD_FEED.csv", "uploaded_by": owner,
+        })
+        staged_rows = [
+            {"row_number": 2, "trip": demo_fuel_trips[-1], "reference": demo_fuel_lines[-1].payment_reference,
+             "amount": demo_fuel_lines[-1].amount, "litres": demo_fuel_lines[-1].quantity_litres,
+             "odometer": demo_fuel_lines[-1].odometer_km, "fill_type": TripExpenseLine.FuelFillType.FULL,
+             "date": today - timedelta(days=7), "note": "SIMULATION · duplicate provider transaction reference; reconciliation should reject it.", "refund": False, "scenario": "duplicate_reference"},
+            {"row_number": 3, "trip": None, "reference": "DEMO-FCARD-UNMATCHED-001", "amount": Decimal("4500.00"),
+             "litres": Decimal("50"), "odometer": None, "fill_type": TripExpenseLine.FuelFillType.UNKNOWN,
+             "date": today - timedelta(days=3), "note": "SIMULATION · unmatched vehicle transaction; match to a trip before reconciliation.", "refund": False, "scenario": "unmatched_vehicle"},
+            {"row_number": 4, "trip": demo_fuel_trips[-1], "reference": demo_fuel_lines[-1].payment_reference, "amount": Decimal("500.00"),
+             "litres": None, "odometer": None, "fill_type": TripExpenseLine.FuelFillType.UNKNOWN,
+             "date": today - timedelta(days=6), "note": "SIMULATION · fuel card refund; matches the original transaction and reduces spend without changing litres.", "refund": True, "scenario": "fuel_refund"},
+        ]
+        for row in staged_rows:
+            FreightImportRow.objects.get_or_create(tenant=tenant, batch=batch, row_number=row["row_number"], defaults={
+                "raw_data": {"source_provider": "SIMULATED_FUEL_CARD", "synthetic_demo": True,
+                    "transaction_reference": row["reference"], "scenario": row["scenario"]},
+                "trip": row["trip"], "kind": FreightImportRow.Kind.EXPENSE, "category": TripExpenseLine.Category.FUEL,
+                "description": "Simulated fuel-card transaction", "amount": row["amount"], "is_refund": row["refund"], "quantity_litres": row["litres"],
+                "fuel_fill_type": row["fill_type"], "odometer_km": row["odometer"], "payment_reference": row["reference"],
+                "incurred_at": row["date"], "review_note": row["note"],
+            })
+
         # A few unassigned orders keep dispatch and return-load views useful.
         for index in range(4):
             customer = customers[(index + 2) % len(customers)]
@@ -446,6 +515,30 @@ class Command(BaseCommand):
                 "next_action": "Compare the receipt with the odometer distance and driver report."},
             "status": "OPEN", "owner": owner, "due_at": now + timedelta(hours=4),
         })
+        budget_trip = FleetTrip.objects.filter(tenant=tenant, vehicle=vehicles[0]).order_by("-created_at").first()
+        budget_ref = "DEMO-FCARD-BUDGET-001"
+        budget_key = uuid.uuid5(uuid.NAMESPACE_URL, f"kriyo-demo-fuel-card-{budget_ref}")
+        if budget_trip:
+            TripExpenseLine.objects.get_or_create(tenant=tenant, idempotency_key=budget_key, defaults={
+                "trip": budget_trip, "category": TripExpenseLine.Category.FUEL,
+                "description": "SIMULATION · sample current-month fuel purchase for budget review",
+                "amount": Decimal("11500.00"), "quantity_litres": Decimal("100"),
+                "fuel_fill_type": TripExpenseLine.FuelFillType.PARTIAL, "odometer_km": Decimal("115000"),
+                "incurred_at": today, "payee": "SIMULATED DEMO FUEL CARD", "payment_reference": budget_ref,
+                "status": TripExpenseLine.ReviewStatus.APPROVED, "created_by": owner,
+            })
+        FleetFuelBudget.objects.update_or_create(tenant=tenant, vehicle=vehicles[0], defaults={
+            "monthly_budget": Decimal("10000.00"), "trip_budget": Decimal("9000.00"),
+            "expected_efficiency_km_per_litre": Decimal("8.50"), "updated_by": owner,
+        })
+        from fleet.anomalies import full_fill_consumption_alerts, fuel_budget_alerts
+        for fuel_alert in full_fill_consumption_alerts(tenant) + fuel_budget_alerts(tenant):
+            if not fuel_alert.get("synthetic_demo"):
+                continue
+            FleetExceptionCase.objects.get_or_create(tenant=tenant, source_key=f"alert:{fuel_alert['id']}", defaults={
+                "category": fuel_alert["kind"], "evidence": fuel_alert, "status": "OPEN", "owner": owner,
+                "due_at": now + timedelta(hours=8),
+            })
 
         # A public demo URL and intentionally failed notices illustrate the customer view
         # without sending email/WhatsApp or claiming a real customer granted consent.

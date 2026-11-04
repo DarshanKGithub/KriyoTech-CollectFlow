@@ -17,7 +17,7 @@ import Tooltip from "@mui/material/Tooltip";
 import Chip from "@mui/material/Chip";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, useId } from "react";
-import { Activity, Bell, BriefcaseBusiness, ChartNoAxesColumn, Check, ChevronDown, CircleAlert, CreditCard, Clock3, FileCheck2, FilePlus2, Files, FolderOpen, LayoutDashboard, LogOut, Mail, MapPin, Menu, ReceiptIndianRupee, MessageCircle, PanelLeftClose, PanelLeftOpen, Plug, ScrollText, Send, Settings2, ShieldCheck, Sparkles, Tags, Truck, UsersRound, Workflow, Wrench, X } from "lucide-react";
+import { Activity, Bell, BriefcaseBusiness, ChartNoAxesColumn, Check, ChevronDown, CircleAlert, CreditCard, Clock3, FileCheck2, FilePlus2, Files, FolderOpen, Fuel, LayoutDashboard, LogOut, Mail, MapPin, Menu, ReceiptIndianRupee, MessageCircle, PanelLeftClose, PanelLeftOpen, Plug, ScrollText, Send, Settings2, ShieldCheck, Sparkles, Tags, Truck, UsersRound, Workflow, Wrench, X } from "lucide-react";
 import { accessToken, apiFetch, workspaceKey } from "@/lib/api";
 import { canShowNavigation, filterNavigation, type NavigationAccess } from "@/lib/navigation-access";
 type Profile = NavigationAccess & {
@@ -81,6 +81,7 @@ const groups: {
                         { label: "Exception center", href: "/fleet/exception-center", icon: CircleAlert },
                     ] },
                     { label: "Fleet finance & insights", href: "/fleet/operational-reports", icon: ChartNoAxesColumn, children: [
+                        { label: "Fuel management", href: "/fleet/fuel", icon: Fuel },
                         { label: "Trip reports", href: "/fleet/trip-reports", icon: ChartNoAxesColumn },
                         { label: "Driver settlements", href: "/fleet/driver-salaries", icon: ReceiptIndianRupee },
                         { label: "Driver pay setup", href: "/fleet/finance-settings", icon: Settings2 },

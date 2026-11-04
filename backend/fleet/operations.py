@@ -1,12 +1,198 @@
 from decimal import Decimal
+from datetime import date, datetime, time
 from django.db import transaction
-from django.db.models import Sum, Min, Max
+from django.db.models import Min, Max, Q, Sum
+from django.http import HttpResponse
+import csv
+import io
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from accounts.permissions import HasTenantMembership
-from .models import DockAppointment, FleetMaintenanceRecord, FleetTrip, FleetVehicle, ReturnLoadOffer, TransportInvoice, TripRevenueLine
+from .models import DockAppointment, FleetFuelBudget, FleetMaintenanceRecord, FleetTrip, FleetVehicle, ReturnLoadOffer, TransportInvoice, TripExpenseLine, TripRevenueLine
 from .views import EDIT_ROLES, REVIEW_ROLES, audit, dock_appointment_data
+
+
+class FuelManagement(APIView):
+    permission_classes = [HasTenantMembership]
+
+    def access(self, request, write=False):
+        return request.membership.role in (EDIT_ROLES if write else EDIT_ROLES | REVIEW_ROLES)
+
+    def get(self, request):
+        if not self.access(request):
+            return Response({"error": "Fuel management access required."}, status=403)
+        tenant = request.tenant
+        try:
+            start = date.fromisoformat(request.query_params.get("from", "")[:10]) if request.query_params.get("from") else timezone.localdate().replace(day=1)
+            end = date.fromisoformat(request.query_params.get("to", "")[:10]) if request.query_params.get("to") else timezone.localdate()
+        except ValueError:
+            return Response({"error": "Use valid from/to dates in YYYY-MM-DD format."}, status=400)
+        if end < start or (end - start).days > 366:
+            return Response({"error": "Choose a date range up to 366 days, with the end date on or after the start date."}, status=400)
+        lines = list(TripExpenseLine.objects.filter(tenant=tenant, category=TripExpenseLine.Category.FUEL,
+            incurred_at__gte=start, incurred_at__lte=end, is_estimated=False).select_related(
+                "trip__vehicle", "trip__driver").order_by("-incurred_at", "-created_at")[:5000])
+        vehicle_totals = {}
+        for line in lines:
+            vehicle = line.trip.vehicle
+            item = vehicle_totals.setdefault(str(vehicle.id), {"vehicle_id": str(vehicle.id), "registration_number": vehicle.registration_number,
+                "spend": Decimal("0"), "litres": Decimal("0"), "entries": 0, "monthly_budget": None,
+                "trip_budget": None, "expected_efficiency_km_per_litre": None})
+            if line.status == TripExpenseLine.ReviewStatus.APPROVED:
+                item["spend"] += line.amount
+                if not line.is_refund:
+                    item["litres"] += line.quantity_litres or Decimal("0")
+            item["entries"] += 1
+        budgets = {str(row.vehicle_id): row for row in FleetFuelBudget.objects.filter(tenant=tenant, vehicle_id__in=vehicle_totals)}
+        month_start = timezone.localdate().replace(day=1)
+        monthly_spend = {}
+        for item in TripExpenseLine.objects.filter(tenant=tenant, category=TripExpenseLine.Category.FUEL,
+                status=TripExpenseLine.ReviewStatus.APPROVED, is_estimated=False,
+                incurred_at__gte=month_start, incurred_at__lte=timezone.localdate()).values("trip__vehicle_id", "is_refund").annotate(total=Sum("amount")):
+            key = str(item["trip__vehicle_id"])
+            monthly_spend[key] = monthly_spend.get(key, Decimal("0")) + (item["total"] or Decimal("0"))
+        for vehicle_id, item in vehicle_totals.items():
+            budget = budgets.get(vehicle_id)
+            item["monthly_spend"] = str(monthly_spend.get(vehicle_id, Decimal("0")).quantize(Decimal("0.01")))
+            if budget:
+                item["monthly_budget"] = str(budget.monthly_budget) if budget.monthly_budget is not None else None
+                item["trip_budget"] = str(budget.trip_budget) if budget.trip_budget is not None else None
+                item["expected_efficiency_km_per_litre"] = str(budget.expected_efficiency_km_per_litre) if budget.expected_efficiency_km_per_litre is not None else None
+                item["monthly_budget_exceeded"] = bool(budget.monthly_budget is not None and monthly_spend.get(vehicle_id, Decimal("0")) > budget.monthly_budget)
+            item["spend"] = str(item["spend"].quantize(Decimal("0.01")))
+            item["litres"] = str(item["litres"].quantize(Decimal("0.01")))
+        if request.query_params.get("export") == "csv":
+            stream = io.StringIO(newline="")
+            writer = csv.writer(stream)
+            writer.writerow(["Date", "Vehicle", "Trip", "Driver", "Station", "Litres", "Amount INR", "Unit price INR/L", "Fill type", "Odometer km", "Reference", "Status", "Refund"])
+            for line in lines:
+                litres = line.quantity_litres
+                writer.writerow([line.incurred_at or "", line.trip.vehicle.registration_number, line.trip.trip_number,
+                    line.trip.driver.name if line.trip.driver_id else "", line.payee, litres or "", line.amount,
+                    (line.amount / litres).quantize(Decimal("0.01")) if litres else "", line.fuel_fill_type,
+                    line.odometer_km or "", line.payment_reference, line.status, "Yes" if getattr(line, "is_refund", False) else "No"])
+            response = HttpResponse(stream.getvalue(), content_type="text/csv; charset=utf-8")
+            response["Content-Disposition"] = f'attachment; filename="fuel-report-{start}-{end}.csv"'
+            return response
+        trips = FleetTrip.objects.filter(tenant=tenant, status__in=[FleetTrip.Status.DRAFT, FleetTrip.Status.IN_PROGRESS,
+            FleetTrip.Status.COMPLETED, FleetTrip.Status.REJECTED]).select_related("vehicle", "driver").order_by("-starts_at")[:500]
+        vehicles = FleetVehicle.objects.filter(tenant=tenant).order_by("registration_number")
+        budgets = FleetFuelBudget.objects.filter(tenant=tenant).select_related("vehicle")
+        data = [{"id": str(line.id), "trip_id": str(line.trip_id), "trip_number": line.trip.trip_number,
+            "vehicle_id": str(line.trip.vehicle_id), "vehicle": line.trip.vehicle.registration_number,
+            "driver": line.trip.driver.name if line.trip.driver_id else "", "date": line.incurred_at.isoformat() if line.incurred_at else None,
+            "station": line.payee, "amount": str(line.amount), "litres": str(line.quantity_litres) if line.quantity_litres is not None else None,
+            "unit_price": str((line.amount / line.quantity_litres).quantize(Decimal("0.01"))) if line.quantity_litres else None,
+            "fill_type": line.fuel_fill_type, "odometer_km": str(line.odometer_km) if line.odometer_km is not None else None,
+            "reference": line.payment_reference, "status": line.status, "is_refund": bool(getattr(line, "is_refund", False))} for line in lines]
+        totals = {"spend": str(sum((Decimal(row["amount"]) for row in data if row["status"] == "APPROVED"), Decimal("0")).quantize(Decimal("0.01"))),
+            "litres": str(sum((Decimal(row["litres"] or "0") for row in data if row["status"] == "APPROVED" and not row["is_refund"]), Decimal("0")).quantize(Decimal("0.01"))),
+            "entries": len(data), "pending_review": sum(1 for row in data if row["status"] in {"DRAFT", "SUBMITTED"})}
+        return Response({"from": start.isoformat(), "to": end.isoformat(), "totals": totals, "by_vehicle": list(vehicle_totals.values()),
+            "entries": data, "vehicles": [{"id": str(row.id), "registration_number": row.registration_number} for row in vehicles],
+            "trips": [{"id": str(row.id), "trip_number": row.trip_number, "vehicle_id": str(row.vehicle_id),
+                "vehicle": row.vehicle.registration_number, "driver": row.driver.name if row.driver_id else "", "status": row.status}
+                for row in trips], "budgets": [{"vehicle_id": str(row.vehicle_id), "registration_number": row.vehicle.registration_number,
+                "monthly_budget": str(row.monthly_budget) if row.monthly_budget is not None else "",
+                "trip_budget": str(row.trip_budget) if row.trip_budget is not None else "",
+                "expected_efficiency_km_per_litre": str(row.expected_efficiency_km_per_litre) if row.expected_efficiency_km_per_litre is not None else ""} for row in budgets]})
+
+    @transaction.atomic
+    def post(self, request):
+        from .serializers import TripExpenseLineSerializer
+        if not self.access(request, write=True):
+            return Response({"error": "Fuel entry permission required."}, status=403)
+        trip = FleetTrip.objects.select_for_update().filter(tenant=request.tenant, id=request.data.get("trip_id")).select_related("vehicle").first()
+        if not trip:
+            return Response({"error": "Choose a trip in this workspace."}, status=400)
+        if trip.status not in (FleetTrip.Status.DRAFT, FleetTrip.Status.IN_PROGRESS, FleetTrip.Status.COMPLETED, FleetTrip.Status.REJECTED):
+            return Response({"error": "This trip has been submitted or approved; use a reviewed adjustment workflow."}, status=409)
+        payload = {key: value for key, value in request.data.items() if key in {"description", "amount", "quantity_litres", "fuel_fill_type", "odometer_km", "incurred_at", "payee", "payment_reference", "idempotency_key", "receipt_id"}}
+        payload.update({"category": TripExpenseLine.Category.FUEL, "status": TripExpenseLine.ReviewStatus.DRAFT})
+        serializer = TripExpenseLineSerializer(data=payload, context={"tenant": request.tenant})
+        serializer.is_valid(raise_exception=True)
+        reference = str(serializer.validated_data.get("payment_reference", "")).strip()
+        if reference and TripExpenseLine.objects.filter(tenant=request.tenant, category="FUEL", payment_reference__iexact=reference).exists():
+            return Response({"error": "This receipt or transaction reference is already recorded."}, status=409)
+        line = serializer.save(tenant=request.tenant, trip=trip, created_by=request.user)
+        audit(request, "FLEET_FUEL_QUICK_ENTRY_CREATED", line, {"trip_id": str(trip.id), "vehicle_id": str(trip.vehicle_id), "amount": str(line.amount), "status": line.status})
+        return Response({"id": str(line.id), "status": line.status, "amount": str(line.amount), "unit_price": str((line.amount / line.quantity_litres).quantize(Decimal("0.01"))) if line.quantity_litres else None}, status=201)
+
+    @transaction.atomic
+    def put(self, request):
+        if not self.access(request, write=True):
+            return Response({"error": "Fuel budget permission required."}, status=403)
+        vehicle = FleetVehicle.objects.filter(tenant=request.tenant, id=request.data.get("vehicle_id")).first()
+        if not vehicle:
+            return Response({"error": "Choose a vehicle in this workspace."}, status=400)
+        def optional_decimal(key, maximum):
+            value = request.data.get(key)
+            if value in (None, ""):
+                return None
+            try:
+                parsed = Decimal(str(value))
+                if not parsed.is_finite() or parsed <= 0 or parsed > maximum:
+                    raise ValueError
+                return parsed
+            except Exception:
+                raise ValueError(key)
+        try:
+            monthly = optional_decimal("monthly_budget", Decimal("999999999999.99"))
+            trip_budget = optional_decimal("trip_budget", Decimal("999999999999.99"))
+            efficiency = optional_decimal("expected_efficiency_km_per_litre", Decimal("999999.99"))
+        except ValueError as exc:
+            return Response({"error": f"{exc.args[0]} must be a positive number or blank."}, status=400)
+        if monthly is None and trip_budget is None and efficiency is None:
+            FleetFuelBudget.objects.filter(tenant=request.tenant, vehicle=vehicle).delete()
+            audit(request, "FLEET_FUEL_BUDGET_REMOVED", vehicle, {"vehicle_id": str(vehicle.id)})
+            return Response({"vehicle_id": str(vehicle.id), "removed": True})
+        budget, _ = FleetFuelBudget.objects.update_or_create(tenant=request.tenant, vehicle=vehicle,
+            defaults={"monthly_budget": monthly, "trip_budget": trip_budget, "expected_efficiency_km_per_litre": efficiency, "updated_by": request.user})
+        audit(request, "FLEET_FUEL_BUDGET_UPDATED", budget, {"monthly_budget": str(monthly) if monthly is not None else None,
+            "trip_budget": str(trip_budget) if trip_budget is not None else None,
+            "expected_efficiency_km_per_litre": str(efficiency) if efficiency is not None else None})
+        return Response({"vehicle_id": str(vehicle.id), "monthly_budget": str(monthly) if monthly is not None else "",
+            "trip_budget": str(trip_budget) if trip_budget is not None else "",
+            "expected_efficiency_km_per_litre": str(efficiency) if efficiency is not None else ""})
+
+
+def fuel_interval_summary(lines):
+    """Calculate full-to-full km/L only when every fill in the interval is known."""
+    rows = sorted(lines, key=lambda row: (row.incurred_at or timezone.localdate(), row.created_at, str(row.id)))
+    undated = sum(1 for row in rows if row.incurred_at is None)
+    intervals, previous_full, segment, pending_unknown = [], None, [], False
+    for row in rows:
+        if row.incurred_at is None:
+            pending_unknown = True
+            continue
+        if row.fuel_fill_type == TripExpenseLine.FuelFillType.FULL:
+            if previous_full is not None:
+                delta_km = row.odometer_km - previous_full.odometer_km if row.odometer_km is not None and previous_full.odometer_km is not None else None
+                fills = segment + [row]
+                complete = not pending_unknown and all(item.fuel_fill_type in {
+                    TripExpenseLine.FuelFillType.FULL, TripExpenseLine.FuelFillType.PARTIAL
+                } and item.quantity_litres is not None for item in fills)
+                litres = sum((item.quantity_litres or Decimal("0") for item in fills), Decimal("0"))
+                valid = complete and delta_km is not None and delta_km > 0 and litres > 0
+                intervals.append({"from_date": previous_full.incurred_at.isoformat(), "to_date": row.incurred_at.isoformat(),
+                    "distance_km": str(delta_km) if delta_km is not None and delta_km > 0 else None,
+                    "fuel_litres": str(litres) if complete else None,
+                    "efficiency_km_per_litre": str((delta_km / litres).quantize(Decimal("0.01"))) if valid else None,
+                    "status": "CALCULATED" if valid else "REVIEW_REQUIRED"})
+            previous_full = row if row.odometer_km is not None else None
+            segment, pending_unknown = [], row.odometer_km is None
+        elif previous_full is not None:
+            segment.append(row)
+            if row.fuel_fill_type != TripExpenseLine.FuelFillType.PARTIAL or row.quantity_litres is None:
+                pending_unknown = True
+    calculated = [row for row in intervals if row["status"] == "CALCULATED"]
+    latest = calculated[-1] if calculated else None
+    return {"fill_record_count": len(rows), "undated_fill_count": undated,
+        "interval_count": len(intervals), "latest_efficiency_km_per_litre": latest["efficiency_km_per_litre"] if latest else None,
+        "status": "REVIEW_REQUIRED" if any(row["status"] == "REVIEW_REQUIRED" for row in intervals) or undated else "CALCULATED" if latest else "INSUFFICIENT_DATA",
+        "intervals": intervals[-10:],
+        "basis": "Approved actual fuel expenses between consecutive recorded full fills, using fill odometers. Partial or unknown fills and missing readings do not produce an efficiency value."}
 
 
 class DockDetentionAction(APIView):
@@ -54,8 +240,15 @@ class MaintenanceReliability(APIView):
         if request.membership.role not in EDIT_ROLES | REVIEW_ROLES:
             return Response({"error": "Fleet operations access required."}, status=403)
         output = []
+        trip_states = [FleetTrip.Status.COMPLETED, FleetTrip.Status.SUBMITTED, FleetTrip.Status.APPROVED]
         vehicles = FleetVehicle.objects.filter(tenant=request.tenant).prefetch_related("maintenance_records").annotate(
-            first_km=Min("trips__odometer_start"), last_km=Max("trips__odometer_end"))
+            first_km=Min("trips__odometer_start", filter=Q(trips__status__in=trip_states)),
+            last_km=Max("trips__odometer_end", filter=Q(trips__status__in=trip_states)))
+        fuel_by_vehicle = {}
+        fuel_lines = TripExpenseLine.objects.filter(tenant=request.tenant, category=TripExpenseLine.Category.FUEL,
+            status=TripExpenseLine.ReviewStatus.APPROVED, is_estimated=False, is_refund=False).select_related("trip").order_by("trip__vehicle_id", "incurred_at", "created_at")
+        for line in fuel_lines:
+            fuel_by_vehicle.setdefault(line.trip.vehicle_id, []).append(line)
         now = timezone.now()
         for truck in vehicles:
             records = list(truck.maintenance_records.all())
@@ -67,7 +260,34 @@ class MaintenanceReliability(APIView):
                 if merged and start <= merged[-1][1]: merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
                 else: merged.append((start, end))
             downtime = sum((end-start).total_seconds() for start,end in merged)/3600
-            distance = truck.last_km - truck.first_km if truck.last_km is not None and truck.first_km is not None else None
+            odometer_events = []
+            for trip in truck.trips.filter(status__in=trip_states).exclude(odometer_start__isnull=True, odometer_end__isnull=True):
+                start_at = trip.pickup_at or trip.starts_at or trip.created_at
+                end_at = trip.delivery_at or trip.ends_at or trip.updated_at
+                if trip.odometer_start is not None:
+                    odometer_events.append((start_at, trip.odometer_start, f"Trip {trip.trip_number} start"))
+                if trip.odometer_end is not None:
+                    odometer_events.append((end_at, trip.odometer_end, f"Trip {trip.trip_number} end"))
+            for record in records:
+                if record.odometer_km is not None:
+                    service_at = timezone.make_aware(datetime.combine(record.service_date, time.min))
+                    odometer_events.append((service_at, record.odometer_km, f"Maintenance {record.get_category_display()} ({record.service_date.isoformat()})"))
+            odometer_events.sort(key=lambda event: (event[0],
+                0 if event[2].endswith(" start") else 2 if event[2].endswith(" end") else 1, event[2]))
+            odometer_issues = []
+            previous = None
+            for event_at, reading, label in odometer_events:
+                same_day_maintenance_order = previous and event_at.date() == previous[0].date() and (
+                    event_at.time() == time.min or previous[0].time() == time.min)
+                if previous and reading < previous[1] and not same_day_maintenance_order:
+                    odometer_issues.append({"at": event_at.isoformat(), "reading_km": str(reading),
+                        "evidence": label, "previous_reading_km": str(previous[1]),
+                        "previous_evidence": previous[2],
+                        "message": "Recorded odometer decreased. Check the source reading, event date, or vehicle assignment."})
+                if previous is None or event_at >= previous[0]:
+                    previous = (event_at, reading, label)
+            distance = (truck.last_km - truck.first_km if not odometer_issues and
+                truck.last_km is not None and truck.first_km is not None else None)
             failures = {}
             for record in records:
                 if record.failure_code: failures[record.failure_code] = failures.get(record.failure_code, 0) + 1
@@ -78,11 +298,16 @@ class MaintenanceReliability(APIView):
             if any(r.breakdown_at and not r.returned_to_service_at for r in records): reasons.append("Truck has an open breakdown.")
             if any(r.next_due_date and r.next_due_date <= now.date() for r in latest_service_records): reasons.append("A recorded service date is due.")
             if any(r.next_due_odometer_km is not None and truck.last_km is not None and r.next_due_odometer_km <= truck.last_km for r in latest_service_records): reasons.append("A recorded odometer service threshold is due.")
+            if odometer_issues: reasons.append("Recorded odometer readings are out of sequence; review before using distance or cost-per-kilometre figures.")
             if any(count >= 2 for count in failures.values()): reasons.append("A failure code was recorded more than once; inspect repair history.")
             output.append({"vehicle_id": str(truck.id), "registration_number": truck.registration_number,
                 "vehicle_type":truck.vehicle_type,"capacity_unit":truck.capacity_unit,"capacity":str(truck.capacity) if truck.capacity is not None else None,
                 "maintenance_cost": str(spend), "recorded_distance_km": str(distance) if distance is not None else None,
                 "cost_per_km": str((spend/distance).quantize(Decimal("0.01"))) if distance and distance > 0 else None,
+                "fuel_efficiency": fuel_interval_summary(fuel_by_vehicle.get(truck.id, [])),
+                "odometer_integrity": {"status": "REVIEW_REQUIRED" if odometer_issues else "CONSISTENT" if odometer_events else "INSUFFICIENT_DATA",
+                    "event_count": len(odometer_events), "latest_reading_km": str(odometer_events[-1][1]) if odometer_events else None,
+                    "issues": odometer_issues[:20]},
                 "downtime_hours": round(downtime,2), "failure_counts": failures, "assignment_risk_reasons": reasons,
                 "basis": "All recorded maintenance costs divided by recorded odometer span; incomplete records may distort this metric."})
         return Response({"vehicles": output})
@@ -138,6 +363,8 @@ class ReturnLoadCancel(APIView):
             return Response({"error": "Only an unstarted trip without financial records can be cancelled here. Review active-trip changes with operations."}, status=409)
         trip.status, trip.transport_order = "CANCELLED", None
         trip.save(update_fields=["status", "transport_order", "updated_at"])
+        from .models import FleetResourceReservation
+        FleetResourceReservation.objects.filter(tenant=request.tenant, trip=trip, released_at__isnull=True).update(released_at=timezone.now())
         order.status = "OPEN"
         order.save(update_fields=["status", "updated_at"])
         row.status = "CANCELLED"

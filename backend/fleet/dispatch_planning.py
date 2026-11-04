@@ -34,6 +34,7 @@ ACTIVE_TRIP_STATES = {FleetTrip.Status.DRAFT, FleetTrip.Status.IN_PROGRESS, Flee
 CAPACITY_CONVERSION = {("KG", "TONNE"): Decimal("0.001"), ("TONNE", "KG"): Decimal("1000")}
 MAX_PLAN_ORDERS = 20
 PLAN_LIFETIME = timedelta(minutes=20)
+FLEET_SEARCH_NODE_LIMIT = 25000
 
 
 def _decimal(value, field, *, minimum=None, maximum=None):
@@ -388,6 +389,168 @@ def _build_fleet_assignment(orders, quantities, vehicles, drivers, schedules_by_
     return option, unserved
 
 
+def _build_global_fleet_assignment(orders, quantities, vehicles, drivers, schedules_by_driver,
+                                   starts_at, ends_at, speed, *, node_limit=FLEET_SEARCH_NODE_LIMIT):
+    """Bounded branch-and-bound fleet assignment; optimize served loads, fleet size, and distance."""
+    eligible_drivers = []
+    for driver in drivers:
+        known, reason = _driver_schedule(driver, starts_at, ends_at, schedules_by_driver.get(driver.id, []))
+        if known is not False:
+            eligible_drivers.append({"driver": driver, "shift_known": known, "shift_reason": reason})
+    if not eligible_drivers or not vehicles:
+        return None, [{"order_id": str(order.id), "order_number": order.order_number,
+            "quantity": quantities[str(order.id)], "reasons": ["No available truck and driver pair can serve this dispatch window."]}
+            for order in orders]
+
+    # Most constrained and most time-critical work is assigned first. A deterministic order makes
+    # proposals reproducible and keeps confirmation idempotency stable.
+    by_due = sorted(orders, key=lambda order: (
+        order.delivery_due_at.timestamp() if order.delivery_due_at else float("inf"),
+        order.pickup_due_at.timestamp() if order.pickup_due_at else float("inf"),
+        order.order_number, str(order.id)))
+    route_cache = {}
+    single_vehicle_count = {}
+    for order in by_due:
+        viable = 0
+        for vehicle in vehicles:
+            key = (str(vehicle.id), (str(order.id),))
+            route, _ = _route_for_vehicle([order], quantities, vehicle, starts_at, ends_at, speed)
+            route_cache[key] = route
+            viable += route is not None
+        single_vehicle_count[str(order.id)] = viable
+    ordered = sorted(by_due, key=lambda order: (single_vehicle_count[str(order.id)],
+        order.delivery_due_at.timestamp() if order.delivery_due_at else float("inf"), order.order_number))
+
+    best = None
+    nodes = 0
+    exhausted = False
+    groups = []
+    route_calls = 0
+
+    def score_solution(served_groups, unserved):
+        served_count = sum(len(group["orders"]) for group in served_groups)
+        distances = [group["route"]["distance_km"] for group in served_groups]
+        distance = sum(distances) if all(value is not None for value in distances) else float("inf")
+        known_shifts = sum(1 for group in served_groups if group["driver_row"]["shift_known"] is True)
+        return (served_count, -len(served_groups), -known_shifts, -distance)
+
+    def search(index, unserved, used_vehicles):
+        nonlocal best, nodes, exhausted, route_calls
+        if nodes >= node_limit:
+            exhausted = True
+            return
+        nodes += 1
+        current_served = sum(len(group["orders"]) for group in groups)
+        if best and current_served + len(ordered) - index < best[0][0]:
+            return
+        if index >= len(ordered):
+            if not groups:
+                return
+            used_driver_ids = set()
+            # Driver pairing is part of the search result, and each driver can serve only one trip.
+            chosen_rows = []
+            for group in groups:
+                candidate = next((row for row in eligible_drivers if row["driver"].id not in used_driver_ids), None)
+                if candidate is None:
+                    return
+                used_driver_ids.add(candidate["driver"].id)
+                chosen_rows.append(candidate)
+            for group, driver_row in zip(groups, chosen_rows):
+                group["driver_row"] = driver_row
+            rank = score_solution(groups, unserved)
+            if best is None or rank > best[0]:
+                best = (rank, [dict(group, orders=list(group["orders"])) for group in groups], list(unserved))
+            return
+
+        order = ordered[index]
+        order_key = str(order.id)
+        # Place into an existing truck first, then open another, and finally leave it unserved.
+        seen_vehicle_groups = set()
+        for group in groups:
+            vehicle = group["vehicle"]
+            if vehicle.id in seen_vehicle_groups:
+                continue
+            seen_vehicle_groups.add(vehicle.id)
+            cache_key = (str(vehicle.id), tuple(sorted([str(row.id) for row in group["orders"]] + [order_key])))
+            route = route_cache.get(cache_key)
+            if cache_key not in route_cache:
+                route, _ = _route_for_vehicle(group["orders"] + [order], quantities, vehicle, starts_at, ends_at, speed)
+                route_cache[cache_key] = route
+                route_calls += 1
+            if route is None:
+                continue
+            old_route = group["route"]
+            group["orders"].append(order)
+            group["route"] = route
+            search(index + 1, unserved, used_vehicles)
+            group["orders"].pop()
+            group["route"] = old_route
+
+        if len(groups) < min(len(vehicles), len(eligible_drivers)):
+            for vehicle in vehicles:
+                if vehicle.id in used_vehicles:
+                    continue
+                route = route_cache.get((str(vehicle.id), (order_key,)))
+                if route is None:
+                    continue
+                group = {"vehicle": vehicle, "orders": [order], "route": route}
+                groups.append(group)
+                search(index + 1, unserved, used_vehicles | {vehicle.id})
+                groups.pop()
+                if nodes >= node_limit:
+                    exhausted = True
+                    break
+        unserved.append({"order_id": order_key, "order_number": order.order_number,
+            "quantity": quantities[order_key], "reasons": ["No feasible distinct truck and driver pair was found within the dispatch window."]})
+        search(index + 1, unserved, used_vehicles)
+        unserved.pop()
+
+    search(0, [], set())
+    if best is None:
+        return None, [{"order_id": str(order.id), "order_number": order.order_number,
+            "quantity": quantities[str(order.id)], "reasons": ["No feasible truck and driver assignment was found."]}
+            for order in orders]
+
+    assignments = []
+    for group in best[1]:
+        vehicle, driver_row, route = group["vehicle"], group["driver_row"], group["route"]
+        warnings = list(route["warnings"]) + [driver_row["shift_reason"],
+            "This assignment is a proposal; confirm the complete batch before dispatch."]
+        components = {"capacity_fit": 40, "availability": 20 if driver_row["shift_known"] else 10,
+            "on_time_window_fit": 20 if route["distance_km"] is not None else 10,
+            "route_efficiency": 20 if route["distance_km"] is not None else 10}
+        assignments.append({"vehicle_id": str(vehicle.id), "vehicle": vehicle.registration_number,
+            "driver_id": str(driver_row["driver"].id), "driver": driver_row["driver"].name,
+            "order_ids": [str(order.id) for order in group["orders"]], "score": sum(components.values()),
+            "score_components": components, "route": route, "warnings": warnings})
+    served_ids = {order_id for assignment in assignments for order_id in assignment["order_ids"]}
+    unserved = [{"order_id": str(order.id), "order_number": order.order_number,
+        "quantity": quantities[str(order.id)], "reasons": ["No feasible distinct truck and driver pair was found within the dispatch window."]}
+        for order in orders if str(order.id) not in served_ids]
+    distances = [row["route"]["distance_km"] for row in assignments]
+    all_known = all(value is not None for value in distances)
+    combined_route = {"stops": [stop for row in assignments for stop in row["route"]["stops"]],
+        "distance_km": round(sum(distances), 2) if all_known else None,
+        "distance_kind": "STRAIGHT_LINE_LOWER_BOUND" if all_known else "UNKNOWN",
+        "estimated_travel_minutes": sum((row["route"].get("estimated_travel_minutes") or 0 for row in assignments), 0) if all_known else None,
+        "method": "GLOBAL_FLEET_SEARCH_FALLBACK", "warnings": [warning for row in assignments for warning in row["warnings"]],
+        "unserved_orders": unserved}
+    signature = ":".join(f"{row['vehicle_id']}:{row['driver_id']}:{','.join(sorted(row['order_ids']))}" for row in assignments)
+    optimality = "OPTIMAL_WITHIN_MODEL" if not exhausted else "BEST_FOUND_WITHIN_SEARCH_BUDGET"
+    option = {"option_id": hashlib.sha256(signature.encode()).hexdigest()[:24], "assignments": assignments,
+        "unserved_orders": unserved, "vehicle": " · ".join(row["vehicle"] for row in assignments),
+        "driver": " · ".join(row["driver"] for row in assignments), "vehicle_id": assignments[0]["vehicle_id"],
+        "driver_id": assignments[0]["driver_id"], "route": combined_route,
+        "score_components": {"orders_served": len(served_ids), "trips_used": len(assignments),
+            "search_nodes": nodes, "route_evaluations": route_calls},
+        "score": round(sum(row["score"] for row in assignments) / len(assignments)),
+        "warnings": combined_route["warnings"], "strategy": "global_search",
+        "optimization_status": optimality}
+    if exhausted:
+        option["warnings"].append("Search reached its bounded work limit; this is the best feasible plan found, not a proven optimum.")
+    return option, unserved
+
+
 def _google_waypoint(stop):
     if stop.get("latitude") is not None and stop.get("longitude") is not None:
         return {"location": {"latLng": {"latitude": float(stop["latitude"]), "longitude": float(stop["longitude"])}}}
@@ -732,12 +895,18 @@ class FleetDispatchPlanOptimize(APIView):
             options.sort(key=lambda x: (-x["score"], x["route"]["distance_km"] if x["route"]["distance_km"] is not None else float("inf"), x["vehicle"], x["driver"]))
         eligible_vehicles = [vehicle for vehicle in vehicles if vehicle.id not in unavailable_vehicles and vehicle.id not in broken_vehicles]
         eligible_drivers = [driver for driver in drivers if driver.id not in unavailable_drivers]
+        global_bundle, global_unserved = _build_global_fleet_assignment(orders, quantities,
+            eligible_vehicles, eligible_drivers, schedules_by_driver, starts_at, ends_at, speed)
+        if global_bundle and (len(global_bundle["assignments"]) > 1 or global_unserved):
+            options.append(global_bundle)
+            if not unserved:
+                unserved = global_unserved
+        # Keep deterministic heuristic proposals available if the bounded search cannot find a
+        # complete assignment. They are explicitly labeled as fallbacks in their method metadata.
         for strategy in ("due", "largest_first", "capacity_fit"):
             bundle, bundle_unserved = _build_fleet_assignment(orders, quantities, eligible_vehicles,
                 eligible_drivers, schedules_by_driver, starts_at, ends_at, speed, strategy)
-            if not bundle:
-                continue
-            if len(bundle["assignments"]) > 1 or bundle_unserved:
+            if bundle and (len(bundle["assignments"]) > 1 or bundle_unserved):
                 bundle["strategy"] = strategy
                 options.append(bundle)
                 if not unserved:
@@ -749,10 +918,13 @@ class FleetDispatchPlanOptimize(APIView):
         options = list(distinct.values())
         if options:
             unserved = [] if any(not option.get("unserved_orders") for option in options if option.get("assignments")) else unserved
+            options.sort(key=lambda option: (0 if option.get("strategy") == "global_search" else 1,
+                -option["score"], option["route"]["distance_km"] if option["route"]["distance_km"] is not None else float("inf"),
+                option["vehicle"], option["driver"]))
         snapshot = {"options": options[:30], "unserved_orders": unserved,
-            "method": "deterministic nearest-neighbor routes and greedy fleet batch assignment; no order was assigned",
+            "method": "bounded global fleet search with deterministic nearest-neighbor route feasibility; no order was assigned",
             "ends_at": ends_at.isoformat(), "input_orders": input_data["orders"],
-            "limitations": ["Multi-truck shipment grouping uses a bounded greedy heuristic; it is not a globally optimal fleet solver.",
+            "limitations": ["Fleet assignments use bounded branch-and-bound search over feasible truck groups; an explicit search-budget status distinguishes proven model optima from best-found plans.",
                 "When coordinates exist, distances are straight-line lower bounds from the first stop, not truck road routes. Missing coordinates leave distance and arrival feasibility unknown.",
                 "Traffic, tolls, vehicle restrictions, driver endorsements and legal work-hour rules are not inferred. Add configured driver shifts and confirm legal suitability.",
                 "The plan expires after 20 minutes. Confirmation rechecks order revisions, capacity, schedules, maintenance and competing reservations."],

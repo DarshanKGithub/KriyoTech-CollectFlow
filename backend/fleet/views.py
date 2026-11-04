@@ -27,7 +27,7 @@ from accounts.models import Membership
 from accounts.permissions import HasTenantMembership
 from audit.models import AuditLog
 from documents.models import Document
-from .models import DockAppointment, DriverAdvance, DriverAdvanceRecovery, DriverExpenseSettlement, DriverPayPolicy, DriverSalaryAdjustment, DriverSalaryPayment, DriverSalaryRecord, DriverTripEarning, FleetCustomer, FleetDock, FleetDriver, FleetFollowUp, FleetLogisticsDocument, FleetMaintenanceRecord, FleetResourceReservation, FleetTrip, FleetTripManifestItem, FleetTripStop, FleetTripLocation, FleetTripLocationSample, FleetVehicle, FleetVehicleDocument, FreightImportBatch, FreightImportRow, ReturnLoadOffer, TransportCollection, TransportInvoice, TransportOrder, TripExpenseLine, TripRevenueLine
+from .models import DockAppointment, DriverAdvance, DriverAdvanceRecovery, DriverExpenseSettlement, DriverPayPolicy, DriverSalaryAdjustment, DriverSalaryPayment, DriverSalaryRecord, DriverTripEarning, FleetCustomer, FleetDock, FleetDriver, FleetDriverSchedule, FleetFollowUp, FleetLogisticsDocument, FleetMaintenanceRecord, FleetResourceReservation, FleetTrip, FleetTripManifestItem, FleetTripStop, FleetTripLocation, FleetTripLocationSample, FleetVehicle, FleetVehicleDocument, FreightImportBatch, FreightImportRow, ReturnLoadOffer, TransportCollection, TransportInvoice, TransportOrder, TripExpenseLine, TripRevenueLine
 from .serializers import DriverAdvanceCreateSerializer, DriverAdvanceRecoveryCreateSerializer, DriverPayPolicySerializer, DriverSalaryAdjustmentSerializer, DriverSalaryPaymentSerializer, DriverSalaryRecordSerializer, FleetCustomerSerializer, FleetDriverSerializer, FleetFollowUpSerializer, FleetTripSerializer, FleetVehicleSerializer, TransportCollectionCreateSerializer, TransportInvoiceCreateSerializer, TransportOrderSerializer, TripExpenseLineSerializer, TripRevenueLineSerializer
 from .compatibility import load_compatibility
 
@@ -743,12 +743,38 @@ def location_match_score(left, right):
     return max(token_score, sequence_score)
 
 
+def return_load_window(order, source_trip):
+    """Use an explicit pickup window and delivery deadline, with a conservative 8h estimate otherwise."""
+    starts_at = order.pickup_due_at or source_trip.delivery_at
+    ends_at = order.delivery_due_at if order.delivery_due_at and order.delivery_due_at > starts_at else starts_at + timedelta(hours=8)
+    if ends_at - starts_at > timedelta(hours=48):
+        ends_at = starts_at + timedelta(hours=48)
+    return starts_at, ends_at
+
+
+def return_load_resource_conflict(tenant, vehicle, driver, starts_at, ends_at):
+    if FleetResourceReservation.objects.filter(tenant=tenant, released_at__isnull=True,
+        starts_at__lt=ends_at, ends_at__gt=starts_at).filter(Q(vehicle=vehicle) | Q(driver=driver)).exists():
+        return "The truck or driver has another confirmed dispatch reservation in this return-load window."
+    schedules = list(FleetDriverSchedule.objects.filter(tenant=tenant, driver=driver, active=True,
+        starts_at__lt=ends_at, ends_at__gt=starts_at).order_by("starts_at"))
+    if any(row.kind in {FleetDriverSchedule.Kind.LEAVE, FleetDriverSchedule.Kind.UNAVAILABLE} for row in schedules):
+        return "The driver has recorded leave or unavailable time in this return-load window."
+    shifts = [row for row in schedules if row.kind == FleetDriverSchedule.Kind.SHIFT]
+    if shifts and not any(row.starts_at <= starts_at and row.ends_at >= ends_at for row in shifts):
+        return "No recorded driver shift covers the estimated return-load window."
+    return None
+
+
 def freight_import_row_data(row):
     return {"id": str(row.id), "batch_id": str(row.batch_id), "filename": row.batch.filename,
         "row_number": row.row_number, "raw_data": row.raw_data, "trip_id": str(row.trip_id) if row.trip_id else None,
         "trip_number": row.trip.trip_number if row.trip_id else "", "kind": row.kind, "category": row.category,
         "description": row.description, "amount": str(row.amount) if row.amount is not None else None,
+        "is_refund": row.is_refund,
         "quantity_litres": str(row.quantity_litres) if row.quantity_litres is not None else None,
+        "fuel_fill_type": row.fuel_fill_type, "odometer_km": str(row.odometer_km) if row.odometer_km is not None else None,
+        "payment_reference": row.payment_reference,
         "incurred_at": row.incurred_at.isoformat() if row.incurred_at else None, "status": row.status,
         "review_note": row.review_note}
 
@@ -800,47 +826,74 @@ class FreightImports(APIView):
         aliases = {
             "trip": {"tripnumber", "tripid", "tripreference", "tripno"},
             "kind": {"type", "kind", "linetype", "recordtype"},
+            "transaction_type": {"transactiontype", "transactionkind", "debitcredit", "drcr", "entrytype"},
+            "vehicle": {"vehicle", "vehicleregistration", "registrationnumber", "vehicleid", "trucknumber", "truckregistration"},
             "amount": {"amount", "total", "cost", "revenue", "expenseamount"},
             "description": {"description", "particulars", "details", "narration"},
+            "station": {"station", "fuelstation", "merchant", "merchantname", "vendor", "payee"},
             "category": {"category", "expensecategory"},
             "date": {"date", "incurredat", "transactiondate"},
             "litres": {"litres", "quantitylitres", "fuelquantity"},
+            "fill_type": {"filltype", "fuelfilltype", "tankfill"},
+            "odometer": {"odometer", "odometerkm", "fillodometer", "odometerreading"},
+            "reference": {"paymentreference", "transactionreference", "receiptreference", "ticketnumber", "cardtransactionid", "txnreference", "rrn"},
         }
         created = []
         for number, source in enumerate(parsed, 2):
             data = {key(k): v for k, v in source.items()}
             values = {field: next((data[a] for a in names if a in data), None) for field, names in aliases.items()}
             raw_data = {str(k)[:100]: (v.isoformat() if hasattr(v, "isoformat") else str(v)[:500]) if v is not None else "" for k, v in source.items()}
+            raw_data["vehicle_registration"] = str(values["vehicle"] or "").strip()[:40]
             note = ""
             trip_ref = str(values["trip"] or "").strip()
             trip = FleetTrip.objects.filter(tenant=request.tenant).filter(Q(trip_number__iexact=trip_ref) | Q(customer_reference__iexact=trip_ref)).first() if trip_ref else None
-            type_value = str(values["kind"] or "").strip().upper()
-            kind = FreightImportRow.Kind.REVENUE if type_value in {"REVENUE", "FREIGHT", "INCOME", "CUSTOMER"} else FreightImportRow.Kind.EXPENSE if type_value in {"EXPENSE", "COST", "FUEL", "TOLL", "DRIVER"} else ""
+            type_value = str(values["kind"] or values["transaction_type"] or "").strip().upper()
+            transaction_value = str(values["transaction_type"] or "").strip().upper()
+            is_refund = transaction_value in {"REFUND", "CREDIT", "REVERSAL", "REFUND_CREDIT"} or type_value in {"REFUND", "CREDIT", "REVERSAL"}
+            kind = FreightImportRow.Kind.REVENUE if type_value in {"REVENUE", "FREIGHT", "INCOME", "CUSTOMER"} else FreightImportRow.Kind.EXPENSE if type_value in {"EXPENSE", "COST", "FUEL", "TOLL", "DRIVER", "PURCHASE", "FUEL_PURCHASE", "DEBIT"} else ""
+            if is_refund:
+                kind = FreightImportRow.Kind.EXPENSE
             try:
                 amount = Decimal(str(values["amount"]).replace(",", "")) if values["amount"] is not None else None
-                if amount is not None and (not amount.is_finite() or amount <= 0): amount = None
+                if amount is not None and not amount.is_finite(): amount = None
+                elif amount is not None and amount < 0: amount = abs(amount); is_refund = True
+                elif amount == 0: amount = None
             except Exception:
                 amount = None
             date_value = None
             if values["date"]:
                 try: date_value = values["date"].date() if hasattr(values["date"], "date") else date.fromisoformat(str(values["date"])[:10])
                 except (ValueError, TypeError): pass
-            category_text = str(values["category"] or type_value or "OTHER").strip().upper().replace(" ", "_")
+            category_text = str(values["category"] or ("FUEL" if is_refund or values["station"] or values["litres"] is not None else type_value) or "OTHER").strip().upper().replace(" ", "_")
             category_aliases = {"FUEL": "FUEL", "DIESEL": "FUEL", "TOLL": "TOLL", "FASTAG": "TOLL", "REPAIR": "REPAIR", "MAINTENANCE": "REPAIR", "PARKING": "PARKING", "LOADING": "LOADING", "ALLOWANCE": "ALLOWANCE", "PERMIT": "PERMIT", "COMMISSION": "COMMISSION"}
             category = category_aliases.get(category_text, "OTHER")
+            if not kind and category == "FUEL":
+                kind = FreightImportRow.Kind.EXPENSE
             quantity = None
             try:
                 quantity = Decimal(str(values["litres"]).replace(",", "")) if values["litres"] is not None else None
                 if quantity is not None and (not quantity.is_finite() or quantity <= 0): quantity = None
             except Exception: pass
-            if not trip_ref: note = "Trip reference is missing."
+            fill_type_text = str(values["fill_type"] or "UNKNOWN").strip().upper()
+            fill_type = {"FULL": "FULL", "FULL_TANK": "FULL", "PARTIAL": "PARTIAL", "PARTIAL_FILL": "PARTIAL"}.get(fill_type_text, "UNKNOWN")
+            odometer = None
+            try:
+                odometer = Decimal(str(values["odometer"]).replace(",", "")) if values["odometer"] is not None else None
+                if odometer is not None and (not odometer.is_finite() or odometer < 0): odometer = None
+            except Exception: pass
+            if not trip_ref and values["vehicle"]: note = "Vehicle identified; choose the correct trip for this truck before reconciliation."
+            elif not trip_ref: note = "Trip reference is missing."
             elif not trip: note = "Trip reference did not match a trip in this workspace."
             elif not kind: note = "Set the row type to REVENUE or EXPENSE."
             elif amount is None: note = "Amount is missing or invalid."
+            elif is_refund and category != "FUEL": note = "Refund rows are supported only for fuel transactions."
+            elif category == "FUEL" and not is_refund and fill_type in {"FULL", "PARTIAL"} and (quantity is None or odometer is None or date_value is None): note = "Fuel fill type requires valid litres, odometer, and date."
+            elif is_refund: note = "Fuel credit/refund staged for review; matching transaction reference required. It will reduce net fuel spend and will not count as litres."
             row = FreightImportRow.objects.create(tenant=request.tenant, batch=batch, row_number=number,
-                raw_data=raw_data, trip=trip, kind=kind, category=category,
-                description=str(values["description"] or "Imported freight entry")[:200], amount=amount,
-                quantity_litres=quantity, incurred_at=date_value, review_note=note)
+                raw_data=raw_data, trip=trip, kind=kind, category=category, is_refund=is_refund,
+                description=str(values["description"] or (f"Fuel refund · {values['station']}" if is_refund and values["station"] else "Fuel card refund" if is_refund else f"Fuel purchase · {values['station']}" if category == "FUEL" and values["station"] else "Imported freight entry"))[:200], amount=amount,
+                quantity_litres=quantity, fuel_fill_type=fill_type, odometer_km=odometer,
+                payment_reference=str(values["reference"] or "").strip()[:120], incurred_at=date_value, review_note=note)
             created.append(row)
         audit(request, "FREIGHT_FILE_IMPORTED", batch, {"filename": filename, "row_count": len(created), "checksum": digest})
         return Response({"batch_id": str(batch.id), "status": batch.status, "duplicate_upload": False, "rows": [freight_import_row_data(row) for row in created]}, status=201)
@@ -862,7 +915,7 @@ class FreightImportRowAction(APIView):
             row.review_note = str(request.data.get("note", "Ignored during review."))[:300]
             row.save(update_fields=["status", "review_note"])
         elif action == "reconcile":
-            if request.data.keys() - {"trip_id", "kind", "category", "description", "amount", "quantity_litres", "incurred_at"}:
+            if request.data.keys() - {"trip_id", "kind", "category", "description", "amount", "quantity_litres", "fuel_fill_type", "odometer_km", "incurred_at", "payment_reference"}:
                 return Response({"error": "Unsupported row field."}, status=400)
             trip_id = request.data.get("trip_id")
             if trip_id:
@@ -887,16 +940,47 @@ class FreightImportRowAction(APIView):
                     row.quantity_litres = quantity
                 except Exception:
                     return Response({"error": "Fuel litres must be a positive number."}, status=400)
+            fill_type = request.data.get("fuel_fill_type", row.fuel_fill_type)
+            if fill_type not in TripExpenseLine.FuelFillType.values:
+                return Response({"error": "Choose UNKNOWN, FULL, or PARTIAL fuel fill type."}, status=400)
+            try:
+                odometer_value = request.data.get("odometer_km", row.odometer_km)
+                odometer = Decimal(str(odometer_value)) if odometer_value not in (None, "") else None
+                if odometer is not None and (not odometer.is_finite() or odometer < 0): raise ValueError
+            except Exception:
+                return Response({"error": "Fill odometer must be a non-negative number."}, status=400)
             date_value = request.data.get("incurred_at")
             if date_value:
                 try: row.incurred_at = date.fromisoformat(str(date_value))
                 except ValueError: return Response({"error": "Date must use YYYY-MM-DD."}, status=400)
+            if row.is_refund and (row.category != TripExpenseLine.Category.FUEL or row.kind != FreightImportRow.Kind.EXPENSE):
+                return Response({"error": "Refunds can only be reconciled as fuel expenses."}, status=400)
+            if kind == FreightImportRow.Kind.EXPENSE and row.category == TripExpenseLine.Category.FUEL and not row.is_refund and fill_type in {
+                TripExpenseLine.FuelFillType.FULL, TripExpenseLine.FuelFillType.PARTIAL
+            } and (row.quantity_litres is None or odometer is None or row.incurred_at is None):
+                return Response({"error": "A full or partial fuel fill needs valid litres, odometer, and date."}, status=400)
+            payment_reference = str(request.data.get("payment_reference", row.payment_reference or "")).strip()[:120]
+            if kind == FreightImportRow.Kind.EXPENSE and row.category == TripExpenseLine.Category.FUEL and payment_reference:
+                matching_reference = TripExpenseLine.objects.filter(tenant=request.tenant, category=TripExpenseLine.Category.FUEL,
+                    payment_reference__iexact=payment_reference)
+                if row.is_refund:
+                    original = matching_reference.filter(is_refund=False, trip__vehicle_id=row.trip.vehicle_id).first()
+                    if not original:
+                        return Response({"error": "A fuel refund must match an existing fuel transaction reference for the same vehicle."}, status=409)
+                    if matching_reference.filter(is_refund=True).exists():
+                        return Response({"error": "A refund is already recorded for this fuel transaction reference."}, status=409)
+                elif matching_reference.exists():
+                    return Response({"error": "This fuel transaction reference already exists. Review the source row for a duplicate."}, status=409)
             if kind == FreightImportRow.Kind.REVENUE:
                 revenue = TripRevenueLine.objects.create(tenant=request.tenant, trip=row.trip, description=row.description, amount=amount, is_estimated=False, status=TripRevenueLine.ReviewStatus.DRAFT)
                 row.created_revenue = revenue
             else:
                 expense = TripExpenseLine.objects.create(tenant=request.tenant, trip=row.trip, category=row.category if row.category in TripExpenseLine.Category.values else TripExpenseLine.Category.OTHER,
-                    description=row.description, amount=amount, quantity_litres=row.quantity_litres, incurred_at=row.incurred_at,
+                    description=row.description, amount=-amount if row.is_refund else amount, is_refund=row.is_refund,
+                    quantity_litres=None if row.is_refund else row.quantity_litres, incurred_at=row.incurred_at,
+                    fuel_fill_type=TripExpenseLine.FuelFillType.UNKNOWN if row.is_refund else fill_type if row.category == "FUEL" else TripExpenseLine.FuelFillType.UNKNOWN,
+                    odometer_km=None if row.is_refund else odometer if row.category == "FUEL" else None,
+                    payment_reference=payment_reference if row.category == "FUEL" else "",
                     is_estimated=False, status=TripExpenseLine.ReviewStatus.DRAFT, created_by=request.user)
                 row.created_expense = expense
             row.status = FreightImportRow.Status.RECONCILED
@@ -976,6 +1060,9 @@ class ReturnLoadSuggestions(APIView):
                 if place_score < 0.88:
                     continue
                 if order.pickup_due_at and trip.delivery_at and order.pickup_due_at < trip.delivery_at:
+                    continue
+                starts_at, ends_at = return_load_window(order, trip)
+                if return_load_resource_conflict(tenant, trip.vehicle, trip.driver, starts_at, ends_at):
                     continue
                 fit,fit_reason=load_compatibility(trip.vehicle,order)
                 if fit is False:
@@ -1059,7 +1146,7 @@ class ReturnLoadSuggestions(APIView):
             "count": len(suggestions), "suggestions": suggestions[:500],
             "matching_method": "normalized exact delivery-to-pickup location, active trip availability, configured capacity, pickup gap, and historical lane travel time",
             "automatically_assigned": False,
-            "limitations": ["No live map, road distance, traffic or driver-hours provider is configured; lane time is a historical median when at least three completed trips exist.", "Capacity units are not normalized across trucks and orders. Confirm route, legal load limits and driver hours before assignment."],
+            "limitations": ["No live map, road distance, traffic or driver-hours provider is configured; lane time is a historical median when at least three completed trips exist.", "Return-load booking reserves an estimated window using the delivery deadline or an 8-hour default (capped at 48 hours); confirm actual route and driver hours before dispatch."],
         })
 
 
@@ -1146,6 +1233,10 @@ class ReturnLoadOfferAction(APIView):
         driver = FleetDriver.objects.select_for_update().filter(tenant=request.tenant, id=source.driver_id, status=FleetDriver.Status.ACTIVE).first()
         if not vehicle or not driver:
             return Response({"error": "The truck or driver is no longer active."}, status=409)
+        starts_at, ends_at = return_load_window(order, source)
+        conflict = return_load_resource_conflict(request.tenant, vehicle, driver, starts_at, ends_at)
+        if conflict:
+            return Response({"error": conflict}, status=409)
         if FleetMaintenanceRecord.objects.filter(tenant=request.tenant,vehicle=vehicle,breakdown_at__isnull=False,returned_to_service_at__isnull=True).exists():
             return Response({"error":"This truck has an open breakdown. Record its return to service before booking."},status=409)
         active_trip_statuses = [FleetTrip.Status.DRAFT, FleetTrip.Status.IN_PROGRESS, FleetTrip.Status.SUBMITTED]
@@ -1174,7 +1265,9 @@ class ReturnLoadOfferAction(APIView):
         trip_number = f"RT-{uuid4().hex.upper()}"
         trip = FleetTrip.objects.create(tenant=request.tenant, trip_number=trip_number, vehicle=vehicle, driver=driver,
             transport_order=order, customer_reference=order.customer_reference, origin=order.origin, destination=order.destination,
-            starts_at=order.pickup_due_at, status=FleetTrip.Status.DRAFT, created_by=request.user)
+            starts_at=starts_at, ends_at=ends_at, status=FleetTrip.Status.DRAFT, created_by=request.user)
+        FleetResourceReservation.objects.create(tenant=request.tenant, trip=trip, vehicle=vehicle, driver=driver,
+            starts_at=starts_at, ends_at=ends_at)
         order.status = TransportOrder.Status.ASSIGNED
         order.save(update_fields=["status", "updated_at"])
         offer.status = ReturnLoadOffer.Status.BOOKED
@@ -1752,6 +1845,12 @@ class TripLines(APIView):
             return Response({"error": "Trip lines cannot be changed after submission."}, status=409)
         serializer = serializer_class(data=request.data, context={"tenant": request.tenant})
         serializer.is_valid(raise_exception=True)
+        if line_model is TripExpenseLine and serializer.validated_data.get("category") == TripExpenseLine.Category.FUEL:
+            receipt = serializer.validated_data.get("receipt")
+            reference = str(serializer.validated_data.get("payment_reference", "")).strip()
+            duplicates = TripExpenseLine.objects.filter(tenant=request.tenant, category=TripExpenseLine.Category.FUEL)
+            if (receipt and duplicates.filter(receipt=receipt).exists()) or (reference and duplicates.filter(payment_reference__iexact=reference).exists()):
+                return Response({"error": "This receipt or transaction reference is already attached to a fuel expense. Check for a duplicate or use the correction workflow."}, status=409)
         line = serializer.save(tenant=request.tenant, trip=trip, created_by=request.user) if line_model is TripExpenseLine else serializer.save(tenant=request.tenant, trip=trip)
         audit(request, action, line, {"trip_id": str(trip.id), "amount": str(line.amount)})
         return Response(serializer_class(line, context={"tenant": request.tenant}).data, status=201)
@@ -1766,9 +1865,54 @@ class TripLines(APIView):
         if model is None:
             return Response({"error": "Unknown trip line type"}, status=404)
         line = get_object_or_404(model, tenant=request.tenant, trip=trip, id=line_id)
+        if model is TripExpenseLine and line.category == TripExpenseLine.Category.FUEL:
+            return Response({"error": "Fuel records cannot be deleted because they may be part of a consumption interval. Correct the entry with a reason instead."}, status=409)
         audit(request, "FLEET_TRIP_LINE_REMOVED", line, {"trip_id": str(trip.id), "kind": kind, "amount": str(line.amount)})
         line.delete()
         return Response(status=204)
+
+    @transaction.atomic
+    def patch(self, request, trip_id, kind, line_id):
+        if request.membership.role not in EDIT_ROLES or kind != "expenses":
+            return Response({"error": "Fuel expense correction permission required."}, status=403)
+        allowed = {"description", "amount", "budgeted_amount", "quantity_litres", "fuel_fill_type",
+            "odometer_km", "incurred_at", "payee", "payment_reference", "receipt_id", "reason"}
+        if not isinstance(request.data, dict) or set(request.data) - allowed or "reason" not in request.data:
+            return Response({"error": "Provide fuel correction fields and a reason."}, status=400)
+        reason = str(request.data.get("reason", "")).strip()
+        if len(reason) < 8:
+            return Response({"error": "Enter a correction reason of at least 8 characters."}, status=400)
+        trip = FleetTrip.objects.select_for_update().filter(tenant=request.tenant, id=trip_id).first()
+        if not trip:
+            return Response({"error": "Trip not found."}, status=404)
+        if trip.status not in (FleetTrip.Status.DRAFT, FleetTrip.Status.IN_PROGRESS, FleetTrip.Status.COMPLETED, FleetTrip.Status.REJECTED):
+            return Response({"error": "A trip already approved for finance cannot be edited here. Record a reviewed adjustment instead."}, status=409)
+        line = TripExpenseLine.objects.select_for_update().filter(tenant=request.tenant, trip=trip,
+            id=line_id, category=TripExpenseLine.Category.FUEL).first()
+        if not line:
+            return Response({"error": "Fuel expense not found."}, status=404)
+        payload = {key: value for key, value in request.data.items() if key != "reason"}
+        if not payload:
+            return Response({"error": "Provide at least one fuel field to correct."}, status=400)
+        serializer = TripExpenseLineSerializer(line, data=payload, partial=True, context={"tenant": request.tenant})
+        serializer.is_valid(raise_exception=True)
+        receipt = serializer.validated_data.get("receipt", line.receipt)
+        reference = str(serializer.validated_data.get("payment_reference", line.payment_reference)).strip()
+        duplicates = TripExpenseLine.objects.filter(tenant=request.tenant, category=TripExpenseLine.Category.FUEL).exclude(id=line.id)
+        if (receipt and duplicates.filter(receipt=receipt).exists()) or (reference and duplicates.filter(payment_reference__iexact=reference).exists()):
+            return Response({"error": "This receipt or transaction reference is already attached to another fuel expense."}, status=409)
+        tracked = ("description", "amount", "budgeted_amount", "quantity_litres", "fuel_fill_type", "odometer_km",
+            "incurred_at", "payee", "payment_reference", "receipt_id")
+        before = {field: (getattr(line, field).isoformat() if hasattr(getattr(line, field), "isoformat") else
+            str(getattr(line, field)) if getattr(line, field) is not None else None) for field in tracked}
+        previous_status = line.status
+        corrected = serializer.save(status=TripExpenseLine.ReviewStatus.DRAFT)
+        after = {field: (getattr(corrected, field).isoformat() if hasattr(getattr(corrected, field), "isoformat") else
+            str(getattr(corrected, field)) if getattr(corrected, field) is not None else None) for field in tracked}
+        audit(request, "FLEET_FUEL_EXPENSE_CORRECTED", corrected, {"trip_id": str(trip.id), "reason": reason,
+            "previous_status": previous_status, "before": before, "after": after, "reapproval_required": True})
+        return Response({**TripExpenseLineSerializer(corrected, context={"tenant": request.tenant}).data,
+            "correction_requires_review": True})
 
 
 def accrue_driver_trip_earning(trip, request):

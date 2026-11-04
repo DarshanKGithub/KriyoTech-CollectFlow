@@ -286,7 +286,11 @@ class FreightImportRow(models.Model):
     category = models.CharField(max_length=20, blank=True)
     description = models.CharField(max_length=200, blank=True)
     amount = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+    is_refund = models.BooleanField(default=False)
     quantity_litres = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    fuel_fill_type = models.CharField(max_length=10, choices=[("UNKNOWN", "Fill type not recorded"), ("FULL", "Full tank"), ("PARTIAL", "Partial fill")], default="UNKNOWN")
+    odometer_km = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    payment_reference = models.CharField(max_length=120, blank=True)
     incurred_at = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.NEEDS_REVIEW)
     review_note = models.CharField(max_length=300, blank=True)
@@ -920,14 +924,22 @@ class TripExpenseLine(models.Model):
         APPROVED = "APPROVED", "Approved"
         REJECTED = "REJECTED", "Rejected"
 
+    class FuelFillType(models.TextChoices):
+        UNKNOWN = "UNKNOWN", "Fill type not recorded"
+        FULL = "FULL", "Full tank"
+        PARTIAL = "PARTIAL", "Partial fill"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_trip_expenses")
     trip = models.ForeignKey(FleetTrip, on_delete=models.CASCADE, related_name="expense_lines")
     category = models.CharField(max_length=20, choices=Category.choices, default=Category.OTHER)
     description = models.CharField(max_length=200)
     amount = models.DecimalField(max_digits=18, decimal_places=2)
+    is_refund = models.BooleanField(default=False, help_text="Fuel card or station credit; reduces net fuel spend and is not a new fill.")
     budgeted_amount = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
     quantity_litres = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    fuel_fill_type = models.CharField(max_length=10, choices=FuelFillType.choices, default=FuelFillType.UNKNOWN)
+    odometer_km = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     incurred_at = models.DateField(null=True, blank=True)
     payee = models.CharField(max_length=160, blank=True)
     payment_reference = models.CharField(max_length=120, blank=True)
@@ -943,6 +955,19 @@ class TripExpenseLine(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=["tenant", "idempotency_key"], condition=models.Q(idempotency_key__isnull=False), name="uniq_fleet_expense_idempotency")]
         indexes = [models.Index(fields=["tenant", "status", "category"]), models.Index(fields=["tenant", "trip", "incurred_at"])]
+
+
+class FleetFuelBudget(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_fuel_budgets")
+    vehicle = models.OneToOneField(FleetVehicle, on_delete=models.CASCADE, related_name="fuel_budget")
+    monthly_budget = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    trip_budget = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    expected_efficiency_km_per_litre = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    updated_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "vehicle"], name="uniq_tenant_vehicle_fuel_budget")]
 
 
 class FleetFollowUp(models.Model):
