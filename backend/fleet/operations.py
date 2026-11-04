@@ -2,6 +2,7 @@ from decimal import Decimal
 from datetime import date, datetime, time
 from django.db import transaction
 from django.db.models import Min, Max, Q, Sum
+from django.db.models.functions import TruncMonth
 from django.http import HttpResponse
 import csv
 import io
@@ -11,6 +12,20 @@ from rest_framework.views import APIView
 from accounts.permissions import HasTenantMembership
 from .models import DockAppointment, FleetFuelBudget, FleetMaintenanceRecord, FleetTrip, FleetVehicle, ReturnLoadOffer, TransportInvoice, TripExpenseLine, TripRevenueLine
 from .views import EDIT_ROLES, REVIEW_ROLES, audit, dock_appointment_data
+
+
+def month_start_with_offset(day, offset):
+    index = day.year * 12 + day.month - 1 + offset
+    year, month_index = divmod(index, 12)
+    return date(year, month_index + 1, 1)
+
+
+def spend_direction(current, previous):
+    if previous <= 0:
+        return "NEW_ACTIVITY" if current > 0 else "INSUFFICIENT_DATA", None
+    change = (current - previous) * 100 / previous
+    direction = "RISING" if change > 5 else "FALLING" if change < -5 else "STABLE"
+    return direction, str(change.quantize(Decimal("0.1")))
 
 
 class FuelManagement(APIView):
@@ -33,12 +48,13 @@ class FuelManagement(APIView):
         lines = list(TripExpenseLine.objects.filter(tenant=tenant, category=TripExpenseLine.Category.FUEL,
             incurred_at__gte=start, incurred_at__lte=end, is_estimated=False).select_related(
                 "trip__vehicle", "trip__driver").order_by("-incurred_at", "-created_at")[:5000])
-        vehicle_totals = {}
+        vehicle_totals = {str(vehicle.id): {"vehicle_id": str(vehicle.id), "registration_number": vehicle.registration_number,
+            "spend": Decimal("0"), "litres": Decimal("0"), "entries": 0, "monthly_budget": None,
+            "trip_budget": None, "expected_efficiency_km_per_litre": None}
+            for vehicle in FleetVehicle.objects.filter(tenant=tenant).order_by("registration_number")}
         for line in lines:
             vehicle = line.trip.vehicle
-            item = vehicle_totals.setdefault(str(vehicle.id), {"vehicle_id": str(vehicle.id), "registration_number": vehicle.registration_number,
-                "spend": Decimal("0"), "litres": Decimal("0"), "entries": 0, "monthly_budget": None,
-                "trip_budget": None, "expected_efficiency_km_per_litre": None})
+            item = vehicle_totals[str(vehicle.id)]
             if line.status == TripExpenseLine.ReviewStatus.APPROVED:
                 item["spend"] += line.amount
                 if not line.is_refund:
@@ -62,6 +78,44 @@ class FuelManagement(APIView):
                 item["monthly_budget_exceeded"] = bool(budget.monthly_budget is not None and monthly_spend.get(vehicle_id, Decimal("0")) > budget.monthly_budget)
             item["spend"] = str(item["spend"].quantize(Decimal("0.01")))
             item["litres"] = str(item["litres"].quantize(Decimal("0.01")))
+        current_month = timezone.localdate().replace(day=1)
+        previous_month = month_start_with_offset(current_month, -1)
+        trend_start = month_start_with_offset(current_month, -5)
+        trend_rows = TripExpenseLine.objects.filter(tenant=tenant, category=TripExpenseLine.Category.FUEL,
+            status=TripExpenseLine.ReviewStatus.APPROVED, is_estimated=False, incurred_at__gte=trend_start,
+            incurred_at__lte=timezone.localdate()).annotate(month=TruncMonth("incurred_at")).values(
+                "month", "trip__vehicle_id").annotate(spend=Sum("amount"),
+                    litres=Sum("quantity_litres", filter=Q(is_refund=False)))
+        months = []
+        spend_by_vehicle_month = {}
+        for row in trend_rows:
+            month = row["month"].date().replace(day=1) if hasattr(row["month"], "date") else row["month"].replace(day=1)
+            key = (str(row["trip__vehicle_id"]), month)
+            spend_by_vehicle_month[key] = (row["spend"] or Decimal("0"), row["litres"] or Decimal("0"))
+        for offset in range(-5, 1):
+            month = month_start_with_offset(current_month, offset)
+            next_month = month_start_with_offset(month, 1)
+            monthly_spend_total = sum((value[0] for (vehicle_id, key_month), value in spend_by_vehicle_month.items() if key_month == month), Decimal("0"))
+            monthly_litres_total = sum((value[1] for (vehicle_id, key_month), value in spend_by_vehicle_month.items() if key_month == month), Decimal("0"))
+            months.append({"month": month.isoformat()[:7], "spend": str(monthly_spend_total.quantize(Decimal("0.01"))),
+                "litres": str(monthly_litres_total.quantize(Decimal("0.01"))),
+                "average_price_per_litre": str((monthly_spend_total/monthly_litres_total).quantize(Decimal("0.01"))) if monthly_litres_total > 0 else None,
+                "days_counted": min((timezone.localdate().day if month == current_month else (next_month-month).days), (next_month-month).days),
+                "is_partial": month == current_month})
+        current_days = timezone.localdate().day
+        previous_days = (current_month - previous_month).days
+        current_spend_all = sum((value[0] for (vehicle_id, month), value in spend_by_vehicle_month.items() if month == current_month), Decimal("0"))
+        previous_spend_all = sum((value[0] for (vehicle_id, month), value in spend_by_vehicle_month.items() if month == previous_month), Decimal("0"))
+        overall_direction, overall_change = spend_direction(current_spend_all/current_days if current_days else Decimal("0"),
+            previous_spend_all/previous_days if previous_days else Decimal("0"))
+        for vehicle_id, item in vehicle_totals.items():
+            cur = spend_by_vehicle_month.get((vehicle_id, current_month), (Decimal("0"), Decimal("0")))[0] / current_days
+            prev = spend_by_vehicle_month.get((vehicle_id, previous_month), (Decimal("0"), Decimal("0")))[0] / previous_days
+            direction, change = spend_direction(cur, prev)
+            item["spend_trend"] = direction
+            item["daily_spend_change_percent"] = change
+            item["current_month_daily_spend"] = str(cur.quantize(Decimal("0.01")))
+            item["previous_month_daily_spend"] = str(prev.quantize(Decimal("0.01")))
         if request.query_params.get("export") == "csv":
             stream = io.StringIO(newline="")
             writer = csv.writer(stream)
@@ -77,6 +131,9 @@ class FuelManagement(APIView):
             return response
         trips = FleetTrip.objects.filter(tenant=tenant, status__in=[FleetTrip.Status.DRAFT, FleetTrip.Status.IN_PROGRESS,
             FleetTrip.Status.COMPLETED, FleetTrip.Status.REJECTED]).select_related("vehicle", "driver").order_by("-starts_at")[:500]
+        load_state_trips = FleetTrip.objects.filter(tenant=tenant, status__in=[FleetTrip.Status.COMPLETED,
+            FleetTrip.Status.SUBMITTED, FleetTrip.Status.APPROVED], odometer_start__isnull=False, odometer_end__isnull=False
+            ).select_related("vehicle", "driver").order_by("-delivery_at")[:1000]
         vehicles = FleetVehicle.objects.filter(tenant=tenant).order_by("registration_number")
         budgets = FleetFuelBudget.objects.filter(tenant=tenant).select_related("vehicle")
         data = [{"id": str(line.id), "trip_id": str(line.trip_id), "trip_number": line.trip.trip_number,
@@ -90,13 +147,21 @@ class FuelManagement(APIView):
             "litres": str(sum((Decimal(row["litres"] or "0") for row in data if row["status"] == "APPROVED" and not row["is_refund"]), Decimal("0")).quantize(Decimal("0.01"))),
             "entries": len(data), "pending_review": sum(1 for row in data if row["status"] in {"DRAFT", "SUBMITTED"})}
         return Response({"from": start.isoformat(), "to": end.isoformat(), "totals": totals, "by_vehicle": list(vehicle_totals.values()),
+            "monthly_trends": months, "spend_trend": {"direction": overall_direction, "daily_change_percent": overall_change,
+                "current_month_daily_spend": str((current_spend_all/current_days).quantize(Decimal("0.01"))) if current_days else "0.00",
+                "previous_month_daily_spend": str((previous_spend_all/previous_days).quantize(Decimal("0.01"))) if previous_days else "0.00"},
+            "load_state_consumption": fuel_load_state_summary(tenant, min(start, trend_start), end),
             "entries": data, "vehicles": [{"id": str(row.id), "registration_number": row.registration_number} for row in vehicles],
             "trips": [{"id": str(row.id), "trip_number": row.trip_number, "vehicle_id": str(row.vehicle_id),
-                "vehicle": row.vehicle.registration_number, "driver": row.driver.name if row.driver_id else "", "status": row.status}
+                "vehicle": row.vehicle.registration_number, "driver": row.driver.name if row.driver_id else "", "status": row.status,
+                "load_state": row.load_state}
                 for row in trips], "budgets": [{"vehicle_id": str(row.vehicle_id), "registration_number": row.vehicle.registration_number,
                 "monthly_budget": str(row.monthly_budget) if row.monthly_budget is not None else "",
                 "trip_budget": str(row.trip_budget) if row.trip_budget is not None else "",
-                "expected_efficiency_km_per_litre": str(row.expected_efficiency_km_per_litre) if row.expected_efficiency_km_per_litre is not None else ""} for row in budgets]})
+                "expected_efficiency_km_per_litre": str(row.expected_efficiency_km_per_litre) if row.expected_efficiency_km_per_litre is not None else ""} for row in budgets],
+            "load_state_trips": [{"id": str(row.id), "trip_number": row.trip_number, "vehicle_id": str(row.vehicle_id),
+                "vehicle": row.vehicle.registration_number, "load_state": row.load_state, "status": row.status,
+                "odometer_start": str(row.odometer_start), "odometer_end": str(row.odometer_end)} for row in load_state_trips]})
 
     @transaction.atomic
     def post(self, request):
@@ -118,6 +183,28 @@ class FuelManagement(APIView):
         line = serializer.save(tenant=request.tenant, trip=trip, created_by=request.user)
         audit(request, "FLEET_FUEL_QUICK_ENTRY_CREATED", line, {"trip_id": str(trip.id), "vehicle_id": str(trip.vehicle_id), "amount": str(line.amount), "status": line.status})
         return Response({"id": str(line.id), "status": line.status, "amount": str(line.amount), "unit_price": str((line.amount / line.quantity_litres).quantize(Decimal("0.01"))) if line.quantity_litres else None}, status=201)
+
+    @transaction.atomic
+    def patch(self, request):
+        if not self.access(request, write=True):
+            return Response({"error": "Trip load-state edit permission required."}, status=403)
+        if set(request.data) != {"trip_id", "load_state", "reason"}:
+            return Response({"error": "Choose a trip load state and provide a reason for the audit history."}, status=400)
+        trip = FleetTrip.objects.select_for_update().filter(tenant=request.tenant, id=request.data.get("trip_id")).first()
+        if not trip:
+            return Response({"error": "Trip not found in this workspace."}, status=404)
+        state = request.data.get("load_state")
+        reason = str(request.data.get("reason", "")).strip()
+        if state not in FleetTrip.LoadState.values:
+            return Response({"error": "Choose LOADED, EMPTY, or UNKNOWN."}, status=400)
+        if len(reason) < 8 or len(reason) > 500:
+            return Response({"error": "Enter a reason between 8 and 500 characters."}, status=400)
+        previous = trip.load_state
+        trip.load_state = state
+        trip.save(update_fields=["load_state", "updated_at"])
+        audit(request, "FLEET_TRIP_LOAD_STATE_UPDATED", trip, {"previous": previous, "load_state": state, "reason": reason,
+            "historical_analysis_may_change": True})
+        return Response({"id": str(trip.id), "load_state": trip.load_state, "previous_load_state": previous})
 
     @transaction.atomic
     def put(self, request):
@@ -157,7 +244,7 @@ class FuelManagement(APIView):
             "expected_efficiency_km_per_litre": str(efficiency) if efficiency is not None else ""})
 
 
-def fuel_interval_summary(lines):
+def fuel_interval_summary(lines, limit=10):
     """Calculate full-to-full km/L only when every fill in the interval is known."""
     rows = sorted(lines, key=lambda row: (row.incurred_at or timezone.localdate(), row.created_at, str(row.id)))
     undated = sum(1 for row in rows if row.incurred_at is None)
@@ -174,10 +261,14 @@ def fuel_interval_summary(lines):
                     TripExpenseLine.FuelFillType.FULL, TripExpenseLine.FuelFillType.PARTIAL
                 } and item.quantity_litres is not None for item in fills)
                 litres = sum((item.quantity_litres or Decimal("0") for item in fills), Decimal("0"))
+                fuel_cost = sum((item.amount for item in fills), Decimal("0"))
                 valid = complete and delta_km is not None and delta_km > 0 and litres > 0
                 intervals.append({"from_date": previous_full.incurred_at.isoformat(), "to_date": row.incurred_at.isoformat(),
                     "distance_km": str(delta_km) if delta_km is not None and delta_km > 0 else None,
+                    "from_odometer_km": str(previous_full.odometer_km) if previous_full.odometer_km is not None else None,
+                    "to_odometer_km": str(row.odometer_km) if row.odometer_km is not None else None,
                     "fuel_litres": str(litres) if complete else None,
+                    "fuel_cost": str(fuel_cost.quantize(Decimal("0.01"))) if complete else None,
                     "efficiency_km_per_litre": str((delta_km / litres).quantize(Decimal("0.01"))) if valid else None,
                     "status": "CALCULATED" if valid else "REVIEW_REQUIRED"})
             previous_full = row if row.odometer_km is not None else None
@@ -191,8 +282,91 @@ def fuel_interval_summary(lines):
     return {"fill_record_count": len(rows), "undated_fill_count": undated,
         "interval_count": len(intervals), "latest_efficiency_km_per_litre": latest["efficiency_km_per_litre"] if latest else None,
         "status": "REVIEW_REQUIRED" if any(row["status"] == "REVIEW_REQUIRED" for row in intervals) or undated else "CALCULATED" if latest else "INSUFFICIENT_DATA",
-        "intervals": intervals[-10:],
+        "intervals": intervals[-limit:] if limit else intervals,
         "basis": "Approved actual fuel expenses between consecutive recorded full fills, using fill odometers. Partial or unknown fills and missing readings do not produce an efficiency value."}
+
+
+def fuel_load_state_summary(tenant, start, end):
+    """Attribute measured full-to-full fuel intervals only when trip odometers cover the whole interval in one known load state."""
+    from datetime import date as date_type, datetime as datetime_type, time as time_type
+    from .models import FleetTrip
+    fills_by_vehicle = {}
+    for row in TripExpenseLine.objects.filter(tenant=tenant, category=TripExpenseLine.Category.FUEL,
+            status=TripExpenseLine.ReviewStatus.APPROVED, is_estimated=False, is_refund=False,
+            incurred_at__isnull=False, incurred_at__lte=end).select_related("trip").order_by("trip__vehicle_id", "incurred_at", "created_at"):
+        fills_by_vehicle.setdefault(row.trip.vehicle_id, []).append(row)
+    trips_by_vehicle = {}
+    trips = FleetTrip.objects.filter(tenant=tenant, vehicle_id__in=fills_by_vehicle,
+        status__in=[FleetTrip.Status.COMPLETED, FleetTrip.Status.SUBMITTED, FleetTrip.Status.APPROVED],
+        odometer_start__isnull=False, odometer_end__isnull=False).select_related("vehicle").order_by("vehicle_id", "odometer_start")
+    for trip in trips:
+        trips_by_vehicle.setdefault(trip.vehicle_id, []).append(trip)
+    result = {state: {"intervals": 0, "distance_km": Decimal("0"), "fuel_litres": Decimal("0"),
+        "fuel_cost": Decimal("0"), "trips": set(), "evidence": []} for state in ("EMPTY", "LOADED")}
+    unclassified = {"insufficient_trip_odometer_coverage": 0, "unknown_or_mixed_load_state": 0}
+    for vehicle_id, fills in fills_by_vehicle.items():
+        intervals = fuel_interval_summary(fills, limit=None)["intervals"]
+        for interval in intervals:
+            if interval["status"] != "CALCULATED" or not (start.isoformat() <= interval["to_date"] <= end.isoformat()):
+                continue
+            lo, hi = Decimal(interval["from_odometer_km"] or "0"), Decimal(interval["to_odometer_km"] or "0")
+            distance = Decimal(interval["distance_km"] or "0")
+            if hi <= lo or distance <= 0:
+                unclassified["insufficient_trip_odometer_coverage"] += 1
+                continue
+            interval_start = datetime.combine(date_type.fromisoformat(interval["from_date"]), time_type.min).replace(tzinfo=timezone.get_current_timezone())
+            interval_end = datetime.combine(date_type.fromisoformat(interval["to_date"]), time_type.max).replace(tzinfo=timezone.get_current_timezone())
+            spans = []
+            for trip in trips_by_vehicle.get(vehicle_id, []):
+                trip_start, trip_end = trip.starts_at or trip.pickup_at, trip.delivery_at or trip.ends_at
+                if not trip_start or not trip_end or trip_end < interval_start or trip_start > interval_end:
+                    continue
+                t0, t1 = trip.odometer_start, trip.odometer_end
+                if t1 <= lo or t0 >= hi:
+                    continue
+                a, b = max(t0, lo), min(t1, hi)
+                if b > a:
+                    spans.append((a, b, trip))
+            spans.sort(key=lambda part: (part[0], part[1], str(part[2].id)))
+            cursor, covered, states, labels, valid_coverage = lo, Decimal("0"), set(), [], True
+            for a, b, trip in spans:
+                if a < cursor - Decimal("2") or a > cursor + Decimal("5"):
+                    valid_coverage = False
+                    break
+                covered += b - max(cursor, a)
+                cursor = max(cursor, b)
+                states.add(trip.load_state)
+                labels.append(trip.trip_number)
+            tolerance = max(Decimal("5"), distance * Decimal("0.02"))
+            if not valid_coverage or abs(covered-distance) > tolerance or abs(cursor-hi) > tolerance:
+                unclassified["insufficient_trip_odometer_coverage"] += 1
+                continue
+            if len(states) != 1 or not states.issubset({FleetTrip.LoadState.EMPTY, FleetTrip.LoadState.LOADED}):
+                unclassified["unknown_or_mixed_load_state"] += 1
+                continue
+            state = next(iter(states))
+            item = result[state]
+            litres, cost = Decimal(interval["fuel_litres"]), Decimal(interval["fuel_cost"] or "0")
+            item["intervals"] += 1
+            item["distance_km"] += distance
+            item["fuel_litres"] += litres
+            item["fuel_cost"] += cost
+            item["trips"].update(labels)
+            item["evidence"].append({"from_date": interval["from_date"], "to_date": interval["to_date"],
+                "trip_numbers": labels, "distance_km": str(distance), "fuel_litres": str(litres),
+                "fuel_cost": str(cost.quantize(Decimal("0.01"))), "load_state": state})
+    for state, item in result.items():
+        km, litres = item["distance_km"], item["fuel_litres"]
+        item["efficiency_km_per_litre"] = str((km/litres).quantize(Decimal("0.01"))) if km > 0 and litres > 0 else None
+        item["cost_per_km"] = str((item["fuel_cost"]/km).quantize(Decimal("0.01"))) if km > 0 else None
+        item["distance_km"] = str(km.quantize(Decimal("0.1")))
+        item["fuel_litres"] = str(litres.quantize(Decimal("0.01")))
+        item["fuel_cost"] = str(item["fuel_cost"].quantize(Decimal("0.01")))
+        item["trip_count"] = len(item["trips"])
+        del item["trips"]
+    return {"empty": result["EMPTY"], "loaded": result["LOADED"], "unclassified_interval_count": sum(unclassified.values()),
+        "unclassified_reasons": unclassified,
+        "basis": "Measured only from approved full-to-full fuel intervals whose trip odometers cover the interval and whose trips all have the same explicit load state. Mixed, unknown, or incomplete intervals are excluded."}
 
 
 class DockDetentionAction(APIView):

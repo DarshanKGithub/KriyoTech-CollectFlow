@@ -344,12 +344,18 @@ class FleetTrip(models.Model):
         REJECTED = "REJECTED", "Rejected"
         CANCELLED = "CANCELLED", "Cancelled"
 
+    class LoadState(models.TextChoices):
+        UNKNOWN = "UNKNOWN", "Not classified"
+        LOADED = "LOADED", "Carrying cargo"
+        EMPTY = "EMPTY", "Running empty"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_trips")
     trip_number = models.CharField(max_length=64)
     vehicle = models.ForeignKey(FleetVehicle, on_delete=models.PROTECT, related_name="trips")
     driver = models.ForeignKey(FleetDriver, on_delete=models.PROTECT, related_name="trips")
     transport_order = models.OneToOneField(TransportOrder, null=True, blank=True, on_delete=models.PROTECT, related_name="trip")
+    load_state = models.CharField(max_length=10, choices=LoadState.choices, default=LoadState.UNKNOWN)
     customer_reference = models.CharField(max_length=160, blank=True)
     origin = models.CharField(max_length=180, blank=True)
     destination = models.CharField(max_length=180, blank=True)

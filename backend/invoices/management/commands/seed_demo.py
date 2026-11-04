@@ -333,10 +333,15 @@ class Command(BaseCommand):
                 "starts_at": delivery_at - timedelta(hours=8), "pickup_at": delivery_at - timedelta(hours=8),
                 "loaded_at": delivery_at - timedelta(hours=7), "ends_at": delivery_at, "delivery_at": delivery_at,
                 "odometer_start": odometer - Decimal("1000"), "odometer_end": odometer,
+                "load_state": FleetTrip.LoadState.EMPTY if index in {2, 3} else FleetTrip.LoadState.LOADED,
                 "status": FleetTrip.Status.APPROVED, "submitted_by": owner, "submitted_at": delivery_at,
                 "reviewed_by": owner, "reviewed_at": delivery_at + timedelta(minutes=5),
                 "review_note": "Synthetic demo history for full-to-full fuel analysis.", "created_by": owner,
             })
+            desired_load_state = FleetTrip.LoadState.EMPTY if index in {2, 3} else FleetTrip.LoadState.LOADED
+            if trip.load_state == FleetTrip.LoadState.UNKNOWN:
+                trip.load_state = desired_load_state
+                trip.save(update_fields=["load_state", "updated_at"])
             demo_fuel_trips.append(trip)
             reference = f"DEMO-FCARD-{index:03}"
             key = uuid.uuid5(uuid.NAMESPACE_URL, f"kriyo-demo-fuel-card-{reference}")

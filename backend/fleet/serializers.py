@@ -242,7 +242,7 @@ class FleetTripSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = FleetTrip
-        fields = ["id", "trip_number", "vehicle_id", "driver_id", "transport_order_id", "vehicle", "driver", "transport_order", "manifest_items", "stops", "customer_reference", "origin", "destination", "starts_at", "ends_at", "pickup_at", "loaded_at", "delivery_at", "predicted_arrival_at", "eta_source", "eta_error_minutes", "delay_reason", "odometer_start", "odometer_end", "delivery_proof_id", "delivery_proof_name", "delivery_signature_name", "status", "review_note", "revenue_lines", "expense_lines", "revenue_total", "expense_total", "margin", "driver_earning", "created_at", "updated_at"]
+        fields = ["id", "trip_number", "vehicle_id", "driver_id", "transport_order_id", "vehicle", "driver", "transport_order", "manifest_items", "stops", "customer_reference", "origin", "destination", "load_state", "starts_at", "ends_at", "pickup_at", "loaded_at", "delivery_at", "predicted_arrival_at", "eta_source", "eta_error_minutes", "delay_reason", "odometer_start", "odometer_end", "delivery_proof_id", "delivery_proof_name", "delivery_signature_name", "status", "review_note", "revenue_lines", "expense_lines", "revenue_total", "expense_total", "margin", "driver_earning", "created_at", "updated_at"]
         read_only_fields = ["id", "status", "review_note", "pickup_at", "loaded_at", "delivery_at", "predicted_arrival_at", "eta_source", "eta_error_minutes", "delivery_proof_name", "revenue_lines", "expense_lines", "revenue_total", "expense_total", "margin", "created_at", "updated_at"]
 
     def get_vehicle(self, obj):
@@ -361,6 +361,8 @@ class FleetTripSerializer(serializers.ModelSerializer):
             fit,reason=load_compatibility(vehicle,order)
             if fit is False:raise serializers.ValidationError({"transport_order_id":reason})
             attrs["transport_order"] = order
+            if not self.instance and "load_state" not in attrs:
+                attrs["load_state"] = FleetTrip.LoadState.LOADED
             if not attrs.get("customer_reference"):
                 attrs["customer_reference"] = order.customer_reference or order.order_number
             if not attrs.get("origin"):
