@@ -1,6 +1,7 @@
 "use client";
 
 import { Box, Typography } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import { BarChart } from "@mui/x-charts/BarChart";
 import { LineChart } from "@mui/x-charts/LineChart";
 import type { DashboardAnalytics } from "@/components/overview-charts";
@@ -15,6 +16,9 @@ export function OverviewPriorityChart({ aging, byStatus }: {
   aging?: DashboardAnalytics["payable_aging"];
   byStatus: Record<string, number>;
 }) {
+  const theme = useTheme();
+  const primary = theme.palette.primary.main;
+  const secondary = theme.palette.mode === "dark" ? "#A4B697" : "#607D57";
   const rows = aging
     ? aging.map(item => ({ label: buckets[item.bucket] || item.bucket, value: Number(item.amount) }))
     : [
@@ -34,7 +38,7 @@ export function OverviewPriorityChart({ aging, byStatus }: {
     <Box sx={{ flex: 1, minHeight: { xs: 220, md: 0 }, minWidth: 0 }}>
       <BarChart layout="horizontal" skipAnimation hideLegend
         yAxis={[{ scaleType: "band", data: rows.map(row => row.label), width: 132,
-          colorMap: { type: "ordinal", colors: aging ? ["#47876e", "#d28b20", "#d36c35", "#c24145", "#64748b"] : ["#32889b", "#d28b20", "#c24145", "#7761a7", "#17634f"] } }]}
+          colorMap: { type: "ordinal", colors: aging ? [secondary, "#d28b20", "#d36c35", "#c24145", theme.palette.text.secondary] : [secondary, "#d28b20", "#c24145", "#AA8B52", primary] } }]}
         xAxis={[{ min: 0, ...(!hasValues ? { max: 1 } : {}), ...(aging ? { valueFormatter: (value: number) => new Intl.NumberFormat("en-IN", { notation: "compact", maximumFractionDigits: 1 }).format(value) } : { tickMinStep: 1 }) }]}
         series={[{ data: rows.map(row => row.value), label: aging ? "Outstanding balance" : "Invoices",
           valueFormatter: value => aging ? formatMoney(String(value ?? 0)) : `${value ?? 0} invoices` }]}
@@ -46,6 +50,7 @@ export function OverviewPriorityChart({ aging, byStatus }: {
 }
 
 export function OverviewActivityChart({ analytics }: { analytics?: DashboardAnalytics }) {
+  const theme = useTheme();
   const uploads = analytics?.daily_uploads || [];
   return <Box component="section" aria-label="Invoice uploads over the last 30 days" sx={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, minWidth: 0 }}>
     <Typography component="h2" variant="subtitle2">Invoice activity</Typography>
@@ -55,7 +60,7 @@ export function OverviewActivityChart({ analytics }: { analytics?: DashboardAnal
         xAxis={[{ scaleType: "point", data: uploads.map(item => item.date), tickLabelInterval: (_, index) => index % 7 === 0,
           valueFormatter: (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) }]}
         yAxis={[{ min: 0, tickMinStep: 1, ...(!uploads.some(item => item.count > 0) ? { max: 1 } : {}) }]}
-        series={[{ data: uploads.map(item => item.count), label: "Invoices uploaded", color: "#32889b", area: true, showMark: false, curve: "linear", valueFormatter: value => `${value ?? 0} invoices` }]}
+        series={[{ data: uploads.map(item => item.count), label: "Invoices uploaded", color: theme.palette.primary.main, area: true, showMark: false, curve: "linear", valueFormatter: value => `${value ?? 0} invoices` }]}
         grid={{ horizontal: true }} margin={{ top: 8, right: 20, bottom: 4 }}
         sx={{ "& .MuiAreaElement-root": { fillOpacity: 0.15 } }}
       /> : <Typography variant="body2" color="text.secondary" sx={{ p: 3 }}>Upload history unavailable. Refresh to try again.</Typography>}

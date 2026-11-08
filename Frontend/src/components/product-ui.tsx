@@ -71,7 +71,7 @@ export const UiInput = forwardRef<HTMLInputElement,InputHTMLAttributes<HTMLInput
       checked={props.checked} defaultChecked={props.defaultChecked} className={layoutClasses(className)} slotProps={{ input: { ...props, ref } }}/>;
   }
   if (type === "file") return <InputBase type="file" disabled={disabled} required={required} name={name} id={id} inputRef={ref} onChange={onChange}
-    className={className} slotProps={{ input: props }} sx={{ display:className?.split(/\s+/).includes("hidden")?"none":undefined, fontSize: 12, maxWidth: "100%", "& input::file-selector-button": { border: 0, borderRadius: 6, padding: "8px 12px", marginRight: 8, background: "#e4f1eb", color: "#17634f", cursor: "pointer" } }}/>;
+    className={className} slotProps={{ input: props }} sx={{ display:className?.split(/\s+/).includes("hidden")?"none":undefined, fontSize: 12, maxWidth: "100%", "& input::file-selector-button": { border: 0, borderRadius: 6, padding: "8px 12px", marginRight: 8, background: "#e5f2ec", color: "#1F3D2B", cursor: "pointer" } }}/>;
   return <TextField type={type} size="small" variant="outlined" disabled={disabled} required={required} name={name} id={id}
     inputRef={ref} onChange={event => { feedback.clear(); onChange?.(event as React.ChangeEvent<HTMLInputElement>); }} onBlur={event => { if (!event.target.validity.valid) feedback.invalid(event.target as HTMLInputElement); onBlur?.(event as React.FocusEvent<HTMLInputElement>); }}
     error={Boolean(error || feedback.error)} helperText={feedback.error || helperText} value={value} defaultValue={defaultValue} className={layoutClasses(className)}
@@ -89,7 +89,7 @@ export const UiSelect = forwardRef<HTMLSelectElement,SelectHTMLAttributes<HTMLSe
   if (!props.multiple && /vendor|supplier|customer|driver|vehicle|truck|purchase_order|^po_id$|transport_order/.test(`${props.name || ""} ${props["aria-label"] || ""}`.toLowerCase())) return <EntitySelect ref={ref} {...props} className={layoutClasses(className)} onChange={onChange} value={value} defaultValue={defaultValue} disabled={disabled} required={required}>{children}</EntitySelect>;
   return <FormControl size="small" error={Boolean(feedback.error)} disabled={disabled} required={required} className={layoutClasses(className)} sx={{ minWidth: 0, verticalAlign: "middle" }}>
     <NativeSelect value={value} defaultValue={defaultValue} onChange={event=>{feedback.clear();onChange?.(event);}} disableUnderline inputProps={{ ...props, inputRef: ref, onInvalid:(event:React.InvalidEvent<HTMLSelectElement>)=>{event.preventDefault();feedback.invalid(event.currentTarget);props.onInvalid?.(event);} }}
-      sx={{ fontSize: 13, bgcolor: "background.paper", border: "1px solid", borderColor: "#cbd5e1", borderRadius: 1, "& select": { px: 1.5, py: 1.1, minHeight: "1.45em" }, "&:focus-within": { outline: "2px solid #17634f", outlineOffset: -1 }, "&.Mui-disabled": { opacity: 0.6 } }}>{children}</NativeSelect>
+      sx={theme=>({ fontSize: 13, bgcolor: "background.paper", border: "1px solid", borderColor: "divider", borderRadius: 1, "& select": { px: 1.5, py: 1.1, minHeight: "1.45em" }, "&:focus-within": { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: -1 }, "&.Mui-disabled": { opacity: 0.6 } })}>{children}</NativeSelect>
     {feedback.error&&<FormHelperText>{feedback.error}</FormHelperText>}
   </FormControl>;
 });
@@ -119,7 +119,7 @@ export function UiTd({align,...props}: React.TdHTMLAttributes<HTMLTableCellEleme
 export function UiSummary({children,...props}: HTMLAttributes<HTMLElement>) { return <AccordionSummary expandIcon={<ChevronDown size={16}/>} {...props}>{children}</AccordionSummary>; }
 export function UiDetails({children,className,open,...props}: React.DetailsHTMLAttributes<HTMLDetailsElement>) {
   const [summary,...content] = Children.toArray(children);
-  return <Accordion defaultExpanded={open} disableGutters className={className} sx={{ boxShadow: "none", border: "1px solid #e2e8f0", "&:before": { display: "none" } }} id={props.id}>{summary}<AccordionDetails>{content}</AccordionDetails></Accordion>;
+  return <Accordion defaultExpanded={open} disableGutters className={className} sx={{ boxShadow: "none", border: "1px solid", borderColor:"divider", "&:before": { display: "none" } }} id={props.id}>{summary}<AccordionDetails>{content}</AccordionDetails></Accordion>;
 }
 type ModalProps = HTMLAttributes<HTMLDivElement> & { onClose?: () => void };
 export function UiModal({children,onClose}: ModalProps) {

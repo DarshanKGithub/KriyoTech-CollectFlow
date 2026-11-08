@@ -89,7 +89,8 @@ def sync_gmail_mailboxes():
             role__in=[Membership.Role.OWNER, Membership.Role.FINANCE]).select_related("user").order_by("id").first()
         if not membership:
             continue
-        lock_key = f"kriyopay:gmail-invoice-sync:{connection.pk}"
+        from partners.context import current_schema
+        lock_key = f"kriyopay:{current_schema()}:gmail-invoice-sync:{connection.pk}"
         lock_token = uuid.uuid4().hex
         if not client.set(lock_key, lock_token, nx=True, ex=240):
             continue
@@ -108,7 +109,7 @@ def sync_gmail_mailboxes():
         except Exception:
             logger.exception("Scheduled Gmail invoice intake failed for connection %s", connection.pk)
             Notification.objects.get_or_create(tenant=tenant, recipient=membership.user, channel="IN_APP",
-                payload={"title": "Invoice mailbox sync failed", "body": "KriyoPay could not sync this mailbox. Check its connection and retry from Integrations.",
+                payload={"title": "Invoice mailbox sync failed", "body": "The application could not sync this mailbox. Check its connection and retry from Integrations.",
                     "link": "/integrations/gmail", "category": "invoices", "gmail_connection_id": str(connection.id)},
                 defaults={"status": "UNREAD"})
         finally:
@@ -168,7 +169,7 @@ def send_daily_operations_digest():
             if exists:
                 continue
             Notification.objects.create(tenant=tenant, recipient=membership.user, channel="IN_APP", status="UNREAD",
-                payload={"title": "KriyoPay daily operations digest", "body": summary,
+                payload={"title": "Daily operations digest", "body": summary,
                     "link": "/needs-attention", "category": "daily_digest", "digest_date": today.isoformat(),
                     "counts": visible_counts})
             created += 1

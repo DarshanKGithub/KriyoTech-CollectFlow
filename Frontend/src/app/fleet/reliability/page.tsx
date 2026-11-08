@@ -56,7 +56,7 @@ export default function Reliability() {
         { label: "Assignment risks", value: atRisk, Icon: AlertTriangle },
         { label: "Maintenance spend", value: money(String(maintenanceSpend)), Icon: Wrench },
         { label: "Downtime recorded", value: `${downtime} hrs`, Icon: Activity },
-      ].map(metric => <Paper key={metric.label} variant="outlined" sx={{ p: 2 }}><Stack direction="row" sx={{ justifyContent: "space-between" }}><Box><Typography variant="body2" color="text.secondary">{metric.label}</Typography><Typography variant="h5" sx={{ mt: .5, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{loading ? "—" : metric.value}</Typography></Box><metric.Icon size={18} color="#64748b"/></Stack></Paper>)}
+      ].map(metric => <Paper key={metric.label} variant="outlined" sx={{ p: 2 }}><Stack direction="row" sx={{ justifyContent: "space-between" }}><Box><Typography variant="body2" color="text.secondary">{metric.label}</Typography><Typography variant="h5" sx={{ mt: .5, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{loading ? "—" : metric.value}</Typography></Box><metric.Icon size={18} color="#64705F"/></Stack></Paper>)}
     </Box>
     <Paper variant="outlined" sx={{ mt: 2.5, p: { xs: 2, sm: 2.5 } }}>
       <Typography variant="subtitle1">Vehicle assignment profile</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .25 }}>Set the vehicle type and load capacity used to check compatibility during dispatch.</Typography>
@@ -84,7 +84,7 @@ export default function Reliability() {
         {row.assignment_risk_reasons.map(reason => <Alert key={reason} severity="warning" sx={{ mt: 1 }}>{reason}</Alert>)}
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.25 }}>Analysis basis: {row.basis}</Typography>
       </Paper>)}
-      {!loading && rows.length === 0 && <Paper variant="outlined" sx={{ gridColumn: "1/-1", p: 5, textAlign: "center" }}><Wrench size={24} color="#94a3b8"/><Typography variant="subtitle2" sx={{ mt: 1 }}>No vehicle health records</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>Add vehicles and record maintenance and odometer readings to build a reliability view.</Typography></Paper>}
+      {!loading && rows.length === 0 && <Paper variant="outlined" sx={{ gridColumn: "1/-1", p: 5, textAlign: "center" }}><Wrench size={24} color="#9C9D89"/><Typography variant="subtitle2" sx={{ mt: 1 }}>No vehicle health records</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>Add vehicles and record maintenance and odometer readings to build a reliability view.</Typography></Paper>}
     </Box>
   </Box>;
 }

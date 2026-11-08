@@ -65,7 +65,7 @@ export function AdminCompanyCheckout({ companyId, companyName, autoOpen = false,
                 throw new Error("Razorpay did not load. Resume payment to retry.");
             const widget = new window.Razorpay({ key: order.key_id, amount: order.amount, currency: order.currency,
                 name: "KriyoPay", description: `${order.plan_name} · ${order.billing_cycle.toLowerCase()} · ${order.company_name}`,
-                order_id: order.order_id, prefill: order.prefill, theme: { color: "#176b57" },
+                order_id: order.order_id, prefill: order.prefill, theme: { color: "#16734A" },
                 modal: { ondismiss: () => { locked.current = false; setBusy(false); setMessage("Checkout closed. Check Payments if money was debited; otherwise resume payment when ready."); } },
                 handler: async (result) => {
                     setConfirmation(result);

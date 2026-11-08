@@ -159,9 +159,10 @@ class FleetGpsProviderIntake(APIView):
             accuracy = Decimal(str(data["accuracy_m"])) if data.get("accuracy_m") not in (None, "") else None
             speed = Decimal(str(data["speed_kmh"])) if data.get("speed_kmh") not in (None, "") else None
             heading = Decimal(str(data["heading_degrees"])) if data.get("heading_degrees") not in (None, "") else None
+            ignition = data.get("ignition_on")
         except (KeyError, ValueError, TypeError, InvalidOperation, ArithmeticError, json.JSONDecodeError):
             return Response({"error": "GPS provider event fields are invalid or incomplete."}, status=400)
-        if (set(data) - {"provider", "device_id", "event_id", "captured_at", "latitude", "longitude", "accuracy_m", "speed_kmh", "heading_degrees"}
+        if (set(data) - {"provider", "device_id", "event_id", "captured_at", "latitude", "longitude", "accuracy_m", "speed_kmh", "heading_degrees", "ignition_on"}
                 or not DEVICE_NAME.fullmatch(provider) or not device_id or len(device_id) > 128
                 or not external_event_id or len(external_event_id) > 160
                 or not captured_at or not timezone.is_aware(captured_at)
@@ -169,13 +170,14 @@ class FleetGpsProviderIntake(APIView):
                 or not longitude.is_finite() or not -180 <= longitude <= 180
                 or (accuracy is not None and (not accuracy.is_finite() or not 0 <= accuracy <= 5000))
                 or (speed is not None and (not speed.is_finite() or not 0 <= speed <= 432))
-                or (heading is not None and (not heading.is_finite() or not 0 <= heading < 360))):
+                or (heading is not None and (not heading.is_finite() or not 0 <= heading < 360))
+                or (ignition is not None and not isinstance(ignition, bool))):
             return Response({"error": "GPS provider event values are outside their allowed ranges."}, status=400)
         if captured_at > now + timedelta(minutes=2) or captured_at < now - PROVIDER_SAMPLE_RETENTION_WINDOW:
             return Response({"error": "Provider GPS timestamps must be within the last 24 hours and no more than two minutes in the future."}, status=400)
         device = FleetGpsDevice.objects.select_related("vehicle", "tenant").filter(provider=provider,
             device_id=device_id, active=True).first()
-        if not device or not fleet_enabled(device.tenant):
+        if not device or not fleet_enabled(device.tenant, "fleet_tracking"):
             return Response({"error": "GPS device is not actively mapped to an enabled workspace."}, status=404)
         from accounts.workspace_access import workspace_access_denial
         if workspace_access_denial(device.tenant, method="POST"):
@@ -190,7 +192,7 @@ class FleetGpsProviderIntake(APIView):
             return Response({"accepted": True, "duplicate": True}, status=200)
         values = {"reported_by_id": trip.driver.user_id, "source_provider": provider, "latitude": latitude,
             "longitude": longitude, "accuracy_m": accuracy, "speed_kmh": speed, "heading_degrees": heading,
-            "captured_at": captured_at, "client_event_id": canonical_event_id}
+            "ignition_on": ignition, "captured_at": captured_at, "client_event_id": canonical_event_id}
         try:
             with transaction.atomic():
                 sample = FleetTripLocationSample.objects.create(tenant_id=device.tenant_id, trip=trip, **values)

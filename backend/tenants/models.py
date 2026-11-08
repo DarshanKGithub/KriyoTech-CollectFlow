@@ -42,3 +42,10 @@ def default_branch_for(tenant_id):
         branch.is_default = True
         branch.save(update_fields=["is_default"])
     return branch
+
+
+class ProductBrandProfile(models.Model):
+    """Schema-local presentation overrides. Does not contain deployment identity or secrets."""
+    key = models.CharField(primary_key=True, max_length=80, default="brand")
+    values = models.JSONField(default=dict)
+    updated_at = models.DateTimeField(auto_now=True)

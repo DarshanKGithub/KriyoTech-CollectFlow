@@ -82,15 +82,15 @@ export function TripMap({ points, selectedIndex }:{points:MapPoint[];selectedInd
   },[points,selected,size,zoom]);
 
   if (!selected || !map) return null;
-  return <div className="relative mt-2 overflow-hidden rounded-lg border border-slate-200 bg-[#e7ece8]">
+  return <div className="relative mt-2 overflow-hidden rounded-lg border border-slate-200 bg-[#DCE5E0]">
     <div ref={viewportRef} className="relative h-[260px] w-full sm:h-[330px]">
       <div className="absolute inset-0 overflow-hidden">
         {map.tiles.map(tile=><img key={tile.key} src={tile.src} alt="" aria-hidden="true" draggable={false} className="pointer-events-none absolute max-w-none select-none" style={{left:tile.left,top:tile.top,width:TILE_SIZE,height:TILE_SIZE}}/>)}
         <svg role="img" aria-label="Recorded GPS route, start, destination, and selected playback position" viewBox={`0 0 ${size.width} ${size.height}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full overflow-hidden">
-          {map.paths.map((path,index)=><path key={`route-${index}`} d={path} fill="none" stroke="#075e42" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" opacity=".9"/>)}
+          {map.paths.map((path,index)=><path key={`route-${index}`} d={path} fill="none" stroke="#16734A" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" opacity=".9"/>)}
           {map.gapSegments.map((gap,index)=><g key={`gap-${index}`}><path d={`M ${gap.from.x.toFixed(1)} ${gap.from.y.toFixed(1)} L ${gap.to.x.toFixed(1)} ${gap.to.y.toFixed(1)}`} fill="none" stroke="#d97706" strokeWidth="4" strokeDasharray="7 7" strokeLinecap="round" opacity=".9"><title>No GPS fixes for approximately {gap.minutes} minutes</title></path><circle cx={gap.from.x} cy={gap.from.y} r="5" fill="#f59e0b" stroke="white" strokeWidth="2"/><circle cx={gap.to.x} cy={gap.to.y} r="5" fill="#f59e0b" stroke="white" strokeWidth="2"/></g>)}
-          {points.length>1&&<><circle cx={map.startPosition.x} cy={map.startPosition.y} r="7" fill="#15803d" stroke="white" strokeWidth="3"/><circle cx={map.endPosition.x} cy={map.endPosition.y} r="7" fill="#be123c" stroke="white" strokeWidth="3"/></>}
-          <circle cx={map.selectedPosition.x} cy={map.selectedPosition.y} r="9" fill="#0f766e" stroke="white" strokeWidth="4"/>
+          {points.length>1&&<><circle cx={map.startPosition.x} cy={map.startPosition.y} r="7" fill="#16734A" stroke="white" strokeWidth="3"/><circle cx={map.endPosition.x} cy={map.endPosition.y} r="7" fill="#be123c" stroke="white" strokeWidth="3"/></>}
+          <circle cx={map.selectedPosition.x} cy={map.selectedPosition.y} r="9" fill="#16734A" stroke="white" strokeWidth="4"/>
         </svg>
       </div>
       <div className="absolute right-2 top-2 grid overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm">

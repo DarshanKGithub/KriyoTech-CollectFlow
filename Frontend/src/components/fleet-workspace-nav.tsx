@@ -1,6 +1,9 @@
 "use client";
 
 import { AppLink } from "@/components/product-ui";
+import { useContext } from "react";
+import { WorkspaceAccessContext } from "@/components/workspace-access-context";
+import { canShowNavigation } from "@/lib/navigation-access";
 import { usePathname } from "next/navigation";
 import { ChartNoAxesColumn, Fuel, LayoutDashboard, MapPin, Route, Truck, UsersRound } from "lucide-react";
 
@@ -15,11 +18,12 @@ const modules = [
 
 export function FleetWorkspaceNav() {
   const pathname = usePathname();
+  const access = useContext(WorkspaceAccessContext);
   const current = modules.find(item => item.matches(pathname));
   return <div className="fleet-module-bar border-b border-slate-200/80 bg-white/90 px-4 sm:px-6 lg:px-8">
     <div className="mx-auto flex min-h-14 max-w-[1680px] items-center justify-between gap-5">
       <nav aria-label="Fleet workspace modules" className="flex min-w-0 items-center gap-1 overflow-x-auto py-2">
-        {modules.map(item => {
+        {modules.filter(item=>canShowNavigation(item.href,access)).map(item => {
           const Icon = item.icon;
           const active = item === current;
           return <AppLink key={item.href} href={item.href} aria-current={active && pathname === item.href ? "page" : undefined} className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-forest ${active ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"}`}>

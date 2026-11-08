@@ -1,6 +1,7 @@
 "use client";
 
 import NextLink from "next/link";
+import { useTheme } from "@mui/material/styles";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Box from "@mui/material/Box";
@@ -30,7 +31,7 @@ const number = (value: number) => new Intl.NumberFormat("en-IN").format(value);
 const money = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(value);
 const compactMoney = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", notation: "compact", maximumFractionDigits: 1 }).format(value);
 const date = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
-const issueColors = ["#c24145", "#d97706", "#7c5cad", "#256e93", "#438b79", "#64748b"];
+const issueColors = ["#c24145", "#d97706", "#786B45", "#809775", "#607D57", "#64705F"];
 const agingLabels: Record<string,string> = { NOT_OVERDUE: "Not overdue", DAYS_1_7: "1–7 days overdue", DAYS_8_30: "8–30 days overdue", DAYS_31_PLUS: "31+ days overdue", NO_DUE_DATE: "Due date missing" };
 
 function ChartCard({ title, subtitle, metric, detail, href, children, data }: { title: string; subtitle: string; metric: ReactNode; detail: string; href?: string; children: ReactNode; data: { label: string; value: string }[] }) {
@@ -45,15 +46,17 @@ function ChartCard({ title, subtitle, metric, detail, href, children, data }: { 
 }
 
 export function OverviewCharts({ byStatus, exceptions, analytics, allowedPaths }: { byStatus: Record<string,number>; exceptions: { code: string; count: number }[]; analytics?: DashboardAnalytics; allowedPaths?: string[] }) {
+  const theme = useTheme();
+  const primary = theme.palette.primary.main;
   const link=(path:string)=>!allowedPaths || allowedPaths.includes(path) ? path : undefined;
   const stages = [
-    { label: "Processing", statuses: ["UPLOADED", "EXTRACTING"], color: "#32889b" },
+    { label: "Processing", statuses: ["UPLOADED", "EXTRACTING"], color: "#607D57" },
     { label: "Needs review", statuses: ["REVIEW_REQUIRED"], color: "#d28b20" },
     { label: "Blocked", statuses: ["EXTRACTION_FAILED", "EXCEPTION"], color: "#c24145" },
-    { label: "Matching / approval", statuses: ["MATCHED", "APPROVAL_PENDING", "APPROVED"], color: "#7761a7" },
-    { label: "Payment ready", statuses: ["PAYMENT_READY"], color: "#17634f" },
-    { label: "Exported", statuses: ["EXPORTED"], color: "#47876e" },
-    { label: "Rejected", statuses: ["REJECTED"], color: "#64748b" },
+    { label: "Matching / approval", statuses: ["MATCHED", "APPROVAL_PENDING", "APPROVED"], color: "#786B45" },
+    { label: "Payment ready", statuses: ["PAYMENT_READY"], color: primary },
+    { label: "Exported", statuses: ["EXPORTED"], color: "#607D57" },
+    { label: "Rejected", statuses: ["REJECTED"], color: "#64705F" },
   ].map(stage => ({ ...stage, count: stage.statuses.reduce((sum,status) => sum + (byStatus[status] || 0), 0) }));
   const total = Object.values(byStatus).reduce((sum,count) => sum + count, 0);
   const issues = exceptions.filter(item => item.count > 0).sort((a,b) => b.count-a.count);
@@ -70,13 +73,13 @@ export function OverviewCharts({ byStatus, exceptions, analytics, allowedPaths }
     <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ justifyContent: "space-between", alignItems: { sm: "center" }, mb: 2 }}><Typography variant="caption" color="text.secondary">Real workspace activity and current workloads</Typography><Typography variant="caption" color="text.secondary">{snapshot}</Typography></Stack>
     <Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: { xs: "minmax(0,1fr)", xl: "repeat(2,minmax(0,1fr))" } }}>
       <ChartCard title="Daily invoice uploads" subtitle={analytics ? `${date(analytics.start_date)} – ${date(analytics.end_date)} · ${analytics.days} calendar days` : "Upload history"} metric={`${number(uploadTotal)} invoices`} detail="Invoices received during the selected period" href={link("/invoices")} data={uploads.map(item=>({label:item.date,value:`${item.count} invoices`}))}>
-        {analytics && uploadTotal > 0 ? <><Chip size="small" label={change} variant="outlined" sx={{ my: 1 }} /><Box role="img" aria-label={`${uploadTotal} invoices uploaded over ${analytics.days} days. Exact daily counts are in the chart data table.`}><LineChart height={280} xAxis={[{ scaleType:"point", data:uploads.map(item=>item.date), valueFormatter:(value:string)=>date(value), tickLabelInterval:(_,index)=>index % Math.max(1,Math.floor(uploads.length/6)) === 0 }]} yAxis={[{ min:0, tickMinStep:1, label:"Invoices" }]} series={[{ data:uploads.map(item=>item.count), label:"Invoices uploaded", color:"#17634f", area:true, showMark:uploads.length<=7, curve:"linear", valueFormatter:value=>`${value || 0} invoices` }]} grid={{horizontal:true}} hideLegend skipAnimation margin={{left:8,right:20,top:15,bottom:12}} /></Box></> : <EmptyState title={analytics ? "No uploads in this period" : "Upload history unavailable"} description={analytics ? "Choose a wider period or upload an invoice to start tracking daily activity." : "Refresh the dashboard to request current analytics."} />}
+        {analytics && uploadTotal > 0 ? <><Chip size="small" label={change} variant="outlined" sx={{ my: 1 }} /><Box role="img" aria-label={`${uploadTotal} invoices uploaded over ${analytics.days} days. Exact daily counts are in the chart data table.`}><LineChart height={280} xAxis={[{ scaleType:"point", data:uploads.map(item=>item.date), valueFormatter:(value:string)=>date(value), tickLabelInterval:(_,index)=>index % Math.max(1,Math.floor(uploads.length/6)) === 0 }]} yAxis={[{ min:0, tickMinStep:1, label:"Invoices" }]} series={[{ data:uploads.map(item=>item.count), label:"Invoices uploaded", color:primary, area:true, showMark:uploads.length<=7, curve:"linear", valueFormatter:value=>`${value || 0} invoices` }]} grid={{horizontal:true}} hideLegend skipAnimation margin={{left:8,right:20,top:15,bottom:12}} /></Box></> : <EmptyState title={analytics ? "No uploads in this period" : "Upload history unavailable"} description={analytics ? "Choose a wider period or upload an invoice to start tracking daily activity." : "Refresh the dashboard to request current analytics."} />}
       </ChartCard>
       <ChartCard title="Current invoice workflow" subtitle="All invoices · current status" metric={`${number(total)} invoices`} detail="Invoices grouped by their current processing stage" href={link("/invoices")} data={stages.map(stage=>({label:stage.label,value:`${stage.count} invoices`}))}>
-        {total > 0 ? <Box role="img" aria-label={`Workflow: ${stages.map(stage=>`${stage.label}: ${stage.count}`).join(", ")}`}><BarChart layout="horizontal" height={330} yAxis={[{scaleType:"band",data:stages.map(stage=>stage.label),width:145,colorMap:{type:"ordinal",colors:stages.map(stage=>stage.color)}}]} xAxis={[{tickMinStep:1,label:"Invoices",min:0}]} series={[{data:stages.map(stage=>stage.count),label:"Invoices",color:"#17634f",valueFormatter:value=>`${value || 0} invoices`}]} borderRadius={5} grid={{vertical:true}} hideLegend skipAnimation margin={{top:12,right:24,bottom:8}}/></Box> : <EmptyState description="Upload an invoice to see where work is waiting." />}
+        {total > 0 ? <Box role="img" aria-label={`Workflow: ${stages.map(stage=>`${stage.label}: ${stage.count}`).join(", ")}`}><BarChart layout="horizontal" height={330} yAxis={[{scaleType:"band",data:stages.map(stage=>stage.label),width:145,colorMap:{type:"ordinal",colors:stages.map(stage=>stage.color)}}]} xAxis={[{tickMinStep:1,label:"Invoices",min:0}]} series={[{data:stages.map(stage=>stage.count),label:"Invoices",color:primary,valueFormatter:value=>`${value || 0} invoices`}]} borderRadius={5} grid={{vertical:true}} hideLegend skipAnimation margin={{top:12,right:24,bottom:8}}/></Box> : <EmptyState description="Upload an invoice to see where work is waiting." />}
       </ChartCard>
       {aging && <ChartCard title="Approved balances by due date" subtitle="Current outstanding amounts · INR" metric={compactMoney(outstanding)} detail={`${money(overdue)} overdue · excludes cancelled and fully paid invoices`} href={link("/payments")} data={aging.map(item=>({label:agingLabels[item.bucket] || item.bucket,value:`${money(Number(item.amount))} · ${item.count} invoices`}))}>
-        {outstanding > 0 ? <Box role="img" aria-label={`Approved invoice balances: ${aging.map(item=>`${agingLabels[item.bucket]}: ${money(Number(item.amount))}`).join(", ")}`}><BarChart height={330} layout="horizontal" yAxis={[{scaleType:"band",data:aging.map(item=>agingLabels[item.bucket]),width:145,colorMap:{type:"ordinal",colors:["#47876e","#d28b20","#d36c35","#c24145","#64748b"]}}]} xAxis={[{min:0,valueFormatter:(value:number)=>compactMoney(value)}]} series={[{data:aging.map(item=>Number(item.amount)),label:"Outstanding balance",valueFormatter:value=>money(value || 0)}]} borderRadius={5} grid={{vertical:true}} hideLegend skipAnimation margin={{top:16,right:24,bottom:8}} /></Box> : <EmptyState title="No approved balance outstanding" description="Approved invoices with unpaid balances appear here, grouped by their due dates." />}
+        {outstanding > 0 ? <Box role="img" aria-label={`Approved invoice balances: ${aging.map(item=>`${agingLabels[item.bucket]}: ${money(Number(item.amount))}`).join(", ")}`}><BarChart height={330} layout="horizontal" yAxis={[{scaleType:"band",data:aging.map(item=>agingLabels[item.bucket]),width:145,colorMap:{type:"ordinal",colors:["#607D57","#d28b20","#d36c35","#c24145","#64705F"]}}]} xAxis={[{min:0,valueFormatter:(value:number)=>compactMoney(value)}]} series={[{data:aging.map(item=>Number(item.amount)),label:"Outstanding balance",valueFormatter:value=>money(value || 0)}]} borderRadius={5} grid={{vertical:true}} hideLegend skipAnimation margin={{top:16,right:24,bottom:8}} /></Box> : <EmptyState title="No approved balance outstanding" description="Approved invoices with unpaid balances appear here, grouped by their due dates." />}
         <Typography variant="caption" color="text.secondary" sx={{display:"block",mb:2}}>Remaining balance = recorded invoice total minus payment allocations. Due today is not overdue. Missing due dates are shown separately.</Typography>
       </ChartCard>}
       <ChartCard title="What is blocking invoices?" subtitle="Open or assigned exceptions · current snapshot" metric={`${number(issueTotal)} open issues`} detail={issues[0] ? `Most frequent: ${title(issues[0].code)} (${issues[0].count})` : "No unresolved exceptions"} href={link("/exceptions")} data={issues.map(item=>({label:title(item.code),value:`${item.count} issues`}))}>

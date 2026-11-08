@@ -73,7 +73,7 @@ export default function BillingPage() {
             throw new Error(order.error || "Could not create payment order.");
         if (!window.Razorpay)
             throw new Error("Razorpay Checkout did not load. Retry after checking your network.");
-        const widget = new window.Razorpay({ key: order.key_id, amount: order.amount, currency: order.currency, name: "KriyoPay", description: `${data?.available_plans.find(p => p.id === planId)?.name || "Plan"} · ${cycle.toLowerCase()}`, order_id: order.order_id, theme: { color: "#176b57" }, modal: { ondismiss: () => setBusy(false) }, handler: async (result) => { setMessage("Payment received by checkout. Verifying with Razorpay…"); const verify = await apiFetch("/billing/razorpay/verify-payment", { method: "POST", body: JSON.stringify(result) }); const confirmation = await verify.json(); if (!verify.ok) {
+        const widget = new window.Razorpay({ key: order.key_id, amount: order.amount, currency: order.currency, name: "KriyoPay", description: `${data?.available_plans.find(p => p.id === planId)?.name || "Plan"} · ${cycle.toLowerCase()}`, order_id: order.order_id, theme: { color: "#16734A" }, modal: { ondismiss: () => setBusy(false) }, handler: async (result) => { setMessage("Payment received by checkout. Verifying with Razorpay…"); const verify = await apiFetch("/billing/razorpay/verify-payment", { method: "POST", body: JSON.stringify(result) }); const confirmation = await verify.json(); if (!verify.ok) {
                 setMessage(confirmation.error || "Payment remains pending server verification.");
                 setBusy(false);
                 return;

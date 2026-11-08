@@ -34,7 +34,7 @@ export type FleetSnapshot = {
 };
 
 function Panel({ children, area, label }: { children: ReactNode; area: string; label: string }) {
-  return <Box component="section" aria-label={label} sx={{ gridArea: { md: area }, border: "1px solid", borderColor: "divider", borderRadius: "16px", p: { xs: 2, md: 2.25 }, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", bgcolor: "background.paper", boxShadow: "0 2px 8px #172b2705", position: "relative" }}>{children}</Box>;
+  return <Box component="section" aria-label={label} sx={{ gridArea: { md: area }, border: "1px solid", borderColor: "divider", borderRadius: "16px", p: { xs: 2, md: 2.25 }, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", bgcolor: "background.paper", boxShadow: "0 2px 8px #1F3D2B05", position: "relative" }}>{children}</Box>;
 }
 
 export function OverviewVisualDashboard({ summary, profile, fleet, fleetMessage, loading, refreshing, message, onRefresh }: {
@@ -69,7 +69,7 @@ export function OverviewVisualDashboard({ summary, profile, fleet, fleetMessage,
   const groups = [
     { label: "Processing", keys: ["UPLOADED", "EXTRACTING"], color: financeTokens.info },
     { label: "Review / blocked", keys: ["REVIEW_REQUIRED", "EXTRACTION_FAILED", "EXCEPTION"], color: financeTokens.warning },
-    { label: "Approval", keys: ["MATCHED", "APPROVAL_PENDING", "APPROVED"], color: "#6d9989" },
+    { label: "Approval", keys: ["MATCHED", "APPROVAL_PENDING", "APPROVED"], color: "#607D57" },
     { label: "Ready / exported", keys: ["PAYMENT_READY", "EXPORTED"], color: financeTokens.brand },
   ].map((group, id) => ({ id, label: group.label, color: group.color, value: group.keys.reduce((sum, key) => sum + (statuses[key] || 0), 0) }));
   const active = groups.reduce((sum, group) => sum + group.value, 0);

@@ -5,14 +5,25 @@ This is the working design-system contract for incremental UI redesign. Existing
 ## Visual direction
 
 - Enterprise operations product: high information clarity, restrained decoration, readable tables and visible status/freshness.
-- Brand direction: deep navy for structural chrome, professional blue for primary actions, emerald for successful/healthy states, warm amber for attention, red for errors, slate neutrals for surfaces and dividers.
+- Brand palette (6 November 2026): **emerald green `#16734A`** for primary actions, links and identity, with **warm cream `#E8DCC4`** restricted to brand accents. At the user's request, product backgrounds retain the previous neutral canvas, white cards/forms, neutral table headers, and original dark surfaces. Amber attention and red error states remain distinct.
 - Light and dark themes remain supported. Status must include text/icon/context, not color alone.
 - Typography uses a compact sans-serif stack, tabular numerals for money/counts, and clear page-title/section-label/body/caption levels.
 - Use 4px spacing increments; controls target 36–40px height; touch targets should be at least 40px on small screens. Cards use a subtle border and little or no shadow. Reserve larger radii for dialogs and prominent surfaces.
 
 ## Current implementation baseline
 
-`Frontend/src/app/globals.css` defines the shared CSS variables consumed by Tailwind and shadcn-style primitives. `Frontend/src/components/mui-provider.tsx` defines MUI palette, typography, radii and control styles. `Frontend/tailwind.config.ts` maps semantic colors and radius to those variables. The existing forest/emerald palette and hard-coded legacy classes are still in use; a global brand-token swap is intentionally deferred until the component families are migrated and reviewed together.
+`Frontend/src/lib/brand-colors.ts` is the shared TypeScript palette for Tailwind and the MUI finance tokens. `Frontend/src/app/globals.css` holds matching CSS variables for shadcn-style primitives and legacy dark-mode utilities. `Frontend/src/components/mui-provider.tsx` applies the same palette to controls, tables, drawers, dialogs and charts. Tailwind's slate/gray and status color families use their original palettes; the forest utility uses the approved brand green. New screens must use shared semantic tokens for product surfaces.
+
+| Role | Light theme | Dark theme |
+| --- | --- | --- |
+| Primary / primary label | `#16734A` / `#FFFFFF` | `#E8DCC4` / `#16734A` |
+| Canvas | `#F5F7F5` | `#101A17` |
+| Card / form surface | `#FFFFFF` | `#18251F` |
+| Sidebar navigation | `#FFFFFF` | `#18251F` |
+| Text / secondary text | `#1F3D2B` / `#64705F` | `#E7F1EB` / `#A4B8AD` |
+| Border | `#DCE5E0` | `#33483D` |
+
+Use white labels on the emerald primary buttons for readable contrast. Charts must retain distinct warnings/errors and use the active theme's primary color for the main series. QR codes retain a plain white background for scanning.
 
 The live operations screen and unified landing dashboard use the semantic patterns below as the first redesign slices:
 

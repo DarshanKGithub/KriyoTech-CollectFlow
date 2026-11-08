@@ -145,7 +145,7 @@ def extract_invoice(self, invoice_id, extraction_id=None):
                     status="UNREAD" if channel == "IN_APP" else "PENDING",
                     payload={"title": "Invoice extraction failed", "body": f"Invoice {invoice.invoice_number or invoice.id} could not be extracted. Review the invoice and retry extraction.", "link": "/invoices", "category": "invoices", "invoice_id": str(invoice.id)})
                 if channel == "EMAIL":
-                    sent = send_mail("Invoice extraction failed", f"Invoice {invoice.invoice_number or invoice.id} in {invoice.tenant.name} could not be extracted. Review and retry in KriyoPay.", settings.DEFAULT_FROM_EMAIL, [member.user.email], fail_silently=True)
+                    sent = send_mail("Invoice extraction failed", f"Invoice {invoice.invoice_number or invoice.id} in {invoice.tenant.name} could not be extracted. Review and retry in your workspace.", settings.DEFAULT_FROM_EMAIL, [member.user.email], fail_silently=True)
                     if sent:
                         notification.status = "SENT"
                         notification.save(update_fields=["status"])

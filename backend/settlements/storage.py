@@ -11,7 +11,9 @@ class FinancialSourceStorage(FileSystemStorage):
     @property
     def base_location(self):
         media = Path(settings.MEDIA_ROOT)
-        return str(getattr(settings, "FINANCIAL_SOURCE_ROOT", media.parent / ("private_" + media.name)))
+        from partners.context import current_schema
+        root = Path(getattr(settings, "FINANCIAL_SOURCE_ROOT", media.parent / ("private_" + media.name)))
+        return str(root if current_schema() == "public" else root / "resellers" / current_schema())
 
     @property
     def location(self):

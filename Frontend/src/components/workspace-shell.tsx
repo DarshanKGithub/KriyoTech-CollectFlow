@@ -1,4 +1,8 @@
 "use client";
+import { ProductName } from "@/components/partner-brand";
+import { authStorage } from "@/lib/partner";
+
+import { WorkspaceAccessContext } from "@/components/workspace-access-context";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ProductBreadcrumbs } from "@/components/product-breadcrumbs";
 import { NotificationBell } from "@/components/notification-bell";
@@ -146,7 +150,7 @@ function WorkspaceNav({ pathname, summary, collapsed, access }: {
     const [openItems, setOpenItems] = useState<Set<string>>(expandedForPath);
     useEffect(() => {
         let saved: string[] = [];
-        try { const stored: unknown = JSON.parse(localStorage.getItem("kriyopay_navigation_open_groups") || "[]"); if (Array.isArray(stored)) saved = stored.filter((item): item is string => typeof item === "string"); } catch { /* Ignore a malformed saved preference. */ }
+        try { const stored: unknown = JSON.parse(authStorage.getItem("kriyopay_navigation_open_groups") || "[]"); if (Array.isArray(stored)) saved = stored.filter((item): item is string => typeof item === "string"); } catch { /* Ignore a malformed saved preference. */ }
         setOpenItems(current => new Set([...current, ...saved, ...expandedForPath()]));
     }, [expandedForPath]);
     const visibleGroups = groups.map(group => ({ ...group, items: filterNavigation(group.items, access) })).filter(group => group.items.length);
@@ -170,7 +174,7 @@ function WorkspaceNav({ pathname, summary, collapsed, access }: {
         </ListItemButton>;
         return <UiBox key={`${item.href}-${item.label}`}>
           <UiBox className="flex items-center gap-1"><UiBox className="min-w-0 flex-1"><Tooltip title={collapsed ? item.label : ""} placement="right" arrow>{link}</Tooltip></UiBox>
-            {item.children && <Tooltip title={`${openItems.has(item.label) ? "Close" : "Open"} ${item.label}`}><UiIconButton type="button" aria-label={`${openItems.has(item.label) ? "Close" : "Open"} ${item.label} sub-features`} aria-expanded={openItems.has(item.label)} aria-controls={childId} onClick={() => { const next = new Set(openItems); if (next.has(item.label)) next.delete(item.label); else next.add(item.label); setOpenItems(next); try { localStorage.setItem("kriyopay_navigation_open_groups", JSON.stringify([...next])); } catch { /* Navigation remains usable if storage is unavailable. */ } }}>
+            {item.children && <Tooltip title={`${openItems.has(item.label) ? "Close" : "Open"} ${item.label}`}><UiIconButton type="button" aria-label={`${openItems.has(item.label) ? "Close" : "Open"} ${item.label} sub-features`} aria-expanded={openItems.has(item.label)} aria-controls={childId} onClick={() => { const next = new Set(openItems); if (next.has(item.label)) next.delete(item.label); else next.add(item.label); setOpenItems(next); try { authStorage.setItem("kriyopay_navigation_open_groups", JSON.stringify([...next])); } catch { /* Navigation remains usable if storage is unavailable. */ } }}>
               <ChevronDown size={15} style={{ transform: openItems.has(item.label) ? "rotate(0)" : "rotate(-90deg)"}}/>
             </UiIconButton></Tooltip>}
           </UiBox>
@@ -202,7 +206,7 @@ export function WorkspaceShell({ children }: {
     const hidden = pathname === "/login" || pathname === "/admin-login" || pathname === "/signup" || pathname === "/forgot-password" || pathname === "/reset-password" || pathname.startsWith("/portal/") || pathname.startsWith("/invite/") || pathname.startsWith("/admin-console");
     useEffect(() => {
         setSavedWorkspaceKey(workspaceKey());
-        setSidebarCollapsed(localStorage.getItem("kriyopay_sidebar_collapsed") === "true");
+        setSidebarCollapsed(authStorage.getItem("kriyopay_sidebar_collapsed") === "true");
         if (hidden || !accessToken())
             return;
         apiFetch("/auth/workspaces").then(async workspacesResponse => {
@@ -262,21 +266,21 @@ export function WorkspaceShell({ children }: {
         return () => window.removeEventListener("keydown", closeOnEscape);
     }, [menuOpen]);
     function logout() {
-        const refresh = localStorage.getItem("kriyopay_refresh") || "";
+        const refresh = authStorage.getItem("kriyopay_refresh") || "";
         void apiFetch("/auth/logout", { method: "POST", body: JSON.stringify({ refresh }) });
-        ["kriyopay_access", "kriyopay_refresh", "kriyopay_workspace"].forEach(key => localStorage.removeItem(key));
+        ["kriyopay_access", "kriyopay_refresh", "kriyopay_workspace"].forEach(key => authStorage.removeItem(key));
         window.location.assign("/login");
     }
     function switchWorkspace(key: string) {
         if (!key || key === workspaceKey())
             return;
-        localStorage.setItem("kriyopay_workspace", key);
+        authStorage.setItem("kriyopay_workspace", key);
         window.location.reload();
     }
     function toggleSidebar() {
         setSidebarCollapsed(current => {
             const next = !current;
-            localStorage.setItem("kriyopay_sidebar_collapsed", String(next));
+            authStorage.setItem("kriyopay_sidebar_collapsed", String(next));
             return next;
         });
     }
@@ -284,9 +288,9 @@ export function WorkspaceShell({ children }: {
         return <>{children}</>;
     const userName = profile?.name || profile?.email?.split("@")[0] || "Workspace member";
     const initials = userName.split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map(item => item[0].toUpperCase()).join("") || "KP";
-    return <UiBox sx={pathname === "/" ? { "@media (min-width: 900px)": { height: "100dvh", minHeight: 0, display: "flex", flexDirection: "column", "& > header, & > .border-b": { flexShrink: 0 } } } : undefined} className={`min-h-screen transition-[padding] duration-200 ${sidebarCollapsed ? "lg:pl-[68px]" : "lg:pl-[248px]"}`}>
+    return <WorkspaceAccessContext.Provider value={profile}><UiBox sx={pathname === "/" ? { "@media (min-width: 900px)": { height: "100dvh", minHeight: 0, display: "flex", flexDirection: "column", "& > header, & > .border-b": { flexShrink: 0 } } } : undefined} className={`min-h-screen transition-[padding] duration-200 ${sidebarCollapsed ? "lg:pl-[68px]" : "lg:pl-[248px]"}`}>
     <Drawer variant="permanent" sx={{ display: { xs: "none", lg: "block" }, "& .MuiDrawer-paper": { width: sidebarCollapsed ? 68 : 248, boxSizing: "border-box", display: "flex", flexDirection: "column", overflowY: "auto", py: 2, px: sidebarCollapsed ? 1 : 2, transition: "width 200ms" } }}>
-      <UiBox className={`flex items-center ${sidebarCollapsed ? "justify-center" : "justify-between"}`}><Link href="/" title="KriyoPay overview" className={`flex items-center ${sidebarCollapsed ? "justify-center" : "gap-3 px-2"}`}><UiSpan className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-forest text-white"><ReceiptIndianRupee size={21}/></UiSpan>{!sidebarCollapsed && <UiSpan><UiStrong className="block text-base tracking-tight">Kriyo<UiSpan className="text-forest">Pay</UiSpan></UiStrong><UiSpan className="text-[10px] font-medium tracking-[.16em] text-slate-400">FINANCE &amp; FLEET OPS</UiSpan></UiSpan>}</Link>{!sidebarCollapsed && <UiIconButton type="button" onClick={toggleSidebar} title="Collapse sidebar" aria-label="Collapse sidebar" className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"><PanelLeftClose size={17}/></UiIconButton>}</UiBox>
+      <UiBox className={`flex items-center ${sidebarCollapsed ? "justify-center" : "justify-between"}`}><Link href="/" title="KriyoPay overview" className={`flex items-center ${sidebarCollapsed ? "justify-center" : "gap-3 px-2"}`}><UiSpan className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-forest text-white"><ReceiptIndianRupee size={21}/></UiSpan>{!sidebarCollapsed && <UiSpan><UiStrong className="block text-base tracking-tight"><ProductName/></UiStrong><UiSpan className="text-[10px] font-medium tracking-[.16em] text-slate-400">FINANCE &amp; FLEET OPS</UiSpan></UiSpan>}</Link>{!sidebarCollapsed && <UiIconButton type="button" onClick={toggleSidebar} title="Collapse sidebar" aria-label="Collapse sidebar" className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"><PanelLeftClose size={17}/></UiIconButton>}</UiBox>
       {sidebarCollapsed ? <UiBox className="mt-5 flex justify-center" title={profile?.tenant || "Your workspace"}><UiSpan className="grid h-8 w-8 place-items-center rounded-lg bg-mint text-[10px] font-bold text-forest">{(profile?.tenant || "KP").slice(0, 2).toUpperCase()}</UiSpan></UiBox> : <UiBox className="mt-5 rounded-xl border border-line px-3 py-3"><UiStrong className="block truncate text-xs">{profile?.tenant || "Your workspace"}</UiStrong><UiSpan className="text-[10px] text-slate-400">{profile?.workspace_key || savedWorkspaceKey || "Sign in to connect"}</UiSpan>{workspaces.length > 1 && <UiLabel className="mt-2 block text-[10px] font-semibold text-slate-500">Switch company<UiSelect aria-label="Switch workspace" value={profile?.workspace_key || savedWorkspaceKey} onChange={e => switchWorkspace(e.target.value)} className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 text-xs text-ink">{workspaces.map(item => <option key={item.workspace_key} value={item.workspace_key}>{item.tenant}</option>)}</UiSelect></UiLabel>}</UiBox>}
       {sidebarCollapsed && <UiIconButton type="button" onClick={toggleSidebar} title="Expand sidebar" aria-label="Expand sidebar" className="mt-2 grid h-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"><PanelLeftOpen size={17}/></UiIconButton>}
       <UiBox className="mt-5 flex-1"><WorkspaceNav access={profile} pathname={pathname} summary={summary} collapsed={sidebarCollapsed}/></UiBox>
@@ -303,5 +307,5 @@ export function WorkspaceShell({ children }: {
     </UiBox></Drawer>
     <UiBox className="flex items-center justify-between gap-3 border-b border-line bg-white px-5 py-2"><ProductBreadcrumbs allowedPaths={groups.flatMap(group => filterNavigation(group.items, profile).flatMap(item => [item.href, ...(item.children?.map(child => child.href) || [])]))}/><UiBox className="flex items-center gap-2"><ThemeToggle/><NotificationBell access={profile}/></UiBox></UiBox>
     {accessError || (profile && !canShowNavigation(pathname, profile)) ? <UiBox role="status" sx={{m:3,p:4,border:"1px solid",borderColor:"divider",borderRadius:3,bgcolor:"background.paper"}}><ShieldCheck size={28}/><h1 className="mt-4 text-xl font-semibold">Access unavailable</h1><p className="mt-2 text-sm text-slate-500">{accessError || "Your company’s feature access or your role has changed. This page is no longer available to your account. Contact your company administrator if you need access."}</p><p className="mt-2 text-xs text-slate-500">Access refreshes automatically. If it is enabled again, this page will reopen.</p></UiBox> : children}
-  </UiBox>;
+  </UiBox></WorkspaceAccessContext.Provider>;
 }

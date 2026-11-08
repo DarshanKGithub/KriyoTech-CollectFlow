@@ -237,18 +237,18 @@ class Tally(Adapter):
     def collection(self, kind, resource=None):
         root = ET.Element("ENVELOPE")
         header = ET.SubElement(root, "HEADER")
-        for key, value in {"VERSION": "1", "TALLYREQUEST": "Export", "TYPE": "Collection", "ID": "KriyoPayCollection"}.items(): ET.SubElement(header, key).text = value
+        for key, value in {"VERSION": "1", "TALLYREQUEST": "Export", "TYPE": "Collection", "ID": "OperationsCollection"}.items(): ET.SubElement(header, key).text = value
         desc = ET.SubElement(ET.SubElement(root, "BODY"), "DESC")
         variables = ET.SubElement(desc, "STATICVARIABLES")
         ET.SubElement(variables, "SVCURRENTCOMPANY").text = self.config["company"]
         ET.SubElement(variables, "SVEXPORTFORMAT").text = "$$SysName:XML"
         message = ET.SubElement(ET.SubElement(desc, "TDL"), "TDLMESSAGE")
-        collection = ET.SubElement(message, "COLLECTION", {"NAME": "KriyoPayCollection", "ISMODIFY": "No"})
+        collection = ET.SubElement(message, "COLLECTION", {"NAME": "OperationsCollection", "ISMODIFY": "No"})
         ET.SubElement(collection, "TYPE").text = kind
         ET.SubElement(collection, "NATIVEMETHOD").text = "*"
         if resource in VOUCHERS:
-            ET.SubElement(collection, "FILTER").text = "KriyoPayVoucherType"
-            formula = ET.SubElement(message, "SYSTEM", {"TYPE": "Formulae", "NAME": "KriyoPayVoucherType"})
+            ET.SubElement(collection, "FILTER").text = "OperationsVoucherType"
+            formula = ET.SubElement(message, "SYSTEM", {"TYPE": "Formulae", "NAME": "OperationsVoucherType"})
             formula.text = '$VoucherTypeName = "' + VOUCHERS[resource] + '"'
         result = safe_xml(request(self.base, "POST", {"Content-Type": "text/xml; charset=utf-8"}, ET.tostring(root, encoding="utf-8"), xml=True))
         if result.find(".//LINEERROR") is not None: raise ERPError("Tally rejected the collection. Check the company name and gateway configuration.")

@@ -72,7 +72,7 @@ export default function BookingHistory() {
           </Stack>
           {row.status === "BOOKED" && <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ alignItems: { xs: "stretch", sm: "center" }, mt: 2 }}><TextField size="small" label="Cancellation reason" value={reason[row.id] || ""} onChange={event => setReason(current => ({ ...current, [row.id]: event.target.value }))} slotProps={{ htmlInput: { maxLength: 500 } }} sx={{ maxWidth: 460, flex: 1 }}/><Button color="warning" variant="outlined" disabled={busy || !reason[row.id]?.trim()} onClick={() => void cancel(row.id)}>Cancel unstarted booking</Button></Stack>}
         </Box>)}
-        {!loading && filtered.length === 0 && <Box sx={{ p: 6, textAlign: "center" }}><History size={24} color="#94a3b8"/><Typography variant="subtitle2" sx={{ mt: 1 }}>{query ? "No matching bookings" : "No return-load offers yet"}</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>{query ? "Try another order, customer, or vehicle." : "Accepted return-load offers will appear here with their trip and rate."}</Typography></Box>}
+        {!loading && filtered.length === 0 && <Box sx={{ p: 6, textAlign: "center" }}><History size={24} color="#9C9D89"/><Typography variant="subtitle2" sx={{ mt: 1 }}>{query ? "No matching bookings" : "No return-load offers yet"}</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>{query ? "Try another order, customer, or vehicle." : "Accepted return-load offers will appear here with their trip and rate."}</Typography></Box>}
       </Stack>
     </Paper>
   </Box>;

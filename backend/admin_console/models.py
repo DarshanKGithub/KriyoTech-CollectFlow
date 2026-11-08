@@ -65,6 +65,9 @@ class Feature(models.Model):
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
     sort_order = models.PositiveSmallIntegerField(default=0)
+    solution_name = models.CharField(max_length=80, blank=True)
+    monthly_price = models.PositiveBigIntegerField(null=True, blank=True, help_text="Catalog price in paise; null means not priced")
+    price_basis = models.CharField(max_length=20, choices=[("COMPANY", "Per company / month"), ("VEHICLE", "Per vehicle / month")], default="COMPANY")
 
 
 class PlanFeature(models.Model):

@@ -1,3 +1,4 @@
+from partners.instance import export_prefix
 from decimal import Decimal
 from datetime import date, datetime, timedelta
 import unicodedata
@@ -27,7 +28,7 @@ from accounts.models import Membership
 from accounts.permissions import HasTenantMembership
 from audit.models import AuditLog
 from documents.models import Document
-from .models import DockAppointment, DriverAdvance, DriverAdvanceRecovery, DriverExpenseSettlement, DriverPayPolicy, DriverSalaryAdjustment, DriverSalaryPayment, DriverSalaryRecord, DriverTripEarning, FleetCustomer, FleetDock, FleetDriver, FleetDriverSchedule, FleetFollowUp, FleetLogisticsDocument, FleetMaintenanceRecord, FleetResourceReservation, FleetTrip, FleetTripManifestItem, FleetTripStop, FleetTripLocation, FleetTripLocationSample, FleetVehicle, FleetVehicleDocument, FreightImportBatch, FreightImportRow, ReturnLoadOffer, TransportCollection, TransportInvoice, TransportOrder, TripExpenseLine, TripRevenueLine
+from .models import DockAppointment, DriverAdvance, DriverAdvanceRecovery, DriverExpenseSettlement, DriverPayPolicy, DriverSalaryAdjustment, DriverSalaryPayment, DriverSalaryRecord, DriverTripEarning, FleetCustomer, FleetDock, FleetDriver, FleetDriverSchedule, FleetFollowUp, FleetLogisticsDocument, FleetMaintenanceRecord, FleetResourceReservation, FleetStopEpisode, FleetTrip, FleetTripManifestItem, FleetTripStop, FleetTripLocation, FleetTripLocationSample, FleetVehicle, FleetVehicleDocument, FreightImportBatch, FreightImportRow, ReturnLoadOffer, TransportCollection, TransportInvoice, TransportOrder, TripExpenseLine, TripRevenueLine
 from .serializers import DriverAdvanceCreateSerializer, DriverAdvanceRecoveryCreateSerializer, DriverPayPolicySerializer, DriverSalaryAdjustmentSerializer, DriverSalaryPaymentSerializer, DriverSalaryRecordSerializer, FleetCustomerSerializer, FleetDriverSerializer, FleetFollowUpSerializer, FleetTripSerializer, FleetVehicleSerializer, TransportCollectionCreateSerializer, TransportInvoiceCreateSerializer, TransportOrderSerializer, TripExpenseLineSerializer, TripRevenueLineSerializer
 from .compatibility import load_compatibility
 
@@ -583,7 +584,7 @@ class FleetRevenueLeakage(APIView):
             if expected is not None and actual_revenue > 0 and actual_revenue != expected:
                 items.append({**base, "id": f"revenue-variance:{trip.id}", "issue": "FREIGHT_REVENUE_VARIANCE", "severity": "MEDIUM",
                     "message": "Approved trip revenue differs from the transport order agreed amount.",
-                    "next_action": "Review the approved revenue lines and agreed freight amount.", "reasons": ["This is a comparison only; KriyoPay does not change either amount automatically."]})
+                    "next_action": "Review the approved revenue lines and agreed freight amount.", "reasons": ["This is a comparison only; the application does not change either amount automatically."]})
             if expected is not None and expected>0 and actual_revenue==0:
                 items.append({**base,"id":f"missing-revenue:{trip.id}","issue":"MISSING_APPROVED_FREIGHT_REVENUE","severity":"MEDIUM",
                     "message":"Delivered order has an agreed freight amount but no approved actual trip revenue.",
@@ -1779,7 +1780,7 @@ class FleetOperationalReports(APIView):
             writer.writeheader()
             for row in rows: writer.writerow({key: str(value) if value is not None else "" for key, value in row.items()})
             response = HttpResponse(output.getvalue(), content_type="text/csv")
-            response["Content-Disposition"] = f'attachment; filename="kriyopay-{report_name}.csv"'
+            response["Content-Disposition"] = f'attachment; filename="{export_prefix()}-{report_name}.csv"'
             return response
         return Response({"report": report_name, "count": len(rows), "rows": rows})
 
@@ -2123,7 +2124,7 @@ def trip_location_data(trip, location, now=None):
     if not location:
         return {"trip_id": str(trip.id), "trip_number": trip.trip_number, "vehicle": trip.vehicle.registration_number,
             "driver": trip.driver.name, "origin": trip.origin, "destination": trip.destination,
-            "status": "WAITING_FOR_GPS", "latitude": None, "longitude": None, "last_seen_at": None}
+            "status": "WAITING_FOR_GPS", "latitude": None, "longitude": None, "ignition_on": None, "last_seen_at": None}
     age_seconds = max(0, int((now - location.captured_at).total_seconds()))
     return {"trip_id": str(trip.id), "trip_number": trip.trip_number, "vehicle": trip.vehicle.registration_number,
         "driver": trip.driver.name, "origin": trip.origin, "destination": trip.destination,
@@ -2131,6 +2132,7 @@ def trip_location_data(trip, location, now=None):
         "accuracy_m": str(location.accuracy_m) if location.accuracy_m is not None else None,
         "speed_kmh": str(location.speed_kmh) if location.speed_kmh is not None else None,
         "heading_degrees": str(location.heading_degrees) if location.heading_degrees is not None else None,
+        "ignition_on": location.ignition_on,
         "captured_at": location.captured_at.isoformat(), "last_seen_at": location.received_at.isoformat(),
         "age_seconds": age_seconds}
 
@@ -2176,14 +2178,24 @@ class FleetLiveLocations(APIView):
             return Response({"error": "Fleet live-tracking access required."}, status=403)
         now = timezone.now()
         baselines = historical_route_eta_baselines(request.tenant)
-        trips = FleetTrip.objects.filter(tenant=request.tenant, status=FleetTrip.Status.IN_PROGRESS).select_related("vehicle", "driver", "transport_order").prefetch_related(
-            Prefetch("latest_phone_location", queryset=FleetTripLocation.objects.all()))[:1000]
+        trips = list(FleetTrip.objects.filter(tenant=request.tenant, status=FleetTrip.Status.IN_PROGRESS).select_related("vehicle", "driver", "transport_order").prefetch_related(
+            Prefetch("latest_phone_location", queryset=FleetTripLocation.objects.all()))[:1000])
+        stop_by_trip = {stop.trip_id: stop for stop in FleetStopEpisode.objects.filter(
+            tenant=request.tenant, trip_id__in=[trip.id for trip in trips], ended_at__isnull=True)}
         # A OneToOne relation is prefetched to avoid one location query per truck.
         rows = []
         for trip in trips:
             try: location = trip.latest_phone_location
             except FleetTripLocation.DoesNotExist: location = None
             row = trip_location_data(trip, location, now)
+            stop = stop_by_trip.get(trip.id)
+            row["stationary_stop"] = ({
+                "started_at": stop.started_at.isoformat(),
+                "stationary_seconds": max(0, int((now - stop.started_at).total_seconds())),
+                "engine_idle_seconds": stop.engine_idle_seconds,
+                "ignition_on": stop.last_ignition_on,
+                "engine_idle_measured": stop.engine_idle_seconds > 0,
+            } if stop else None)
             origin = trip.origin or (trip.transport_order.origin if trip.transport_order_id else "")
             destination = trip.destination or (trip.transport_order.destination if trip.transport_order_id else "")
             baseline = baselines.get((normalize_location(origin), normalize_location(destination)))
@@ -2276,6 +2288,7 @@ class FleetTripLocationHistory(APIView):
             "accuracy_m": str(sample.accuracy_m) if sample.accuracy_m is not None else None,
             "speed_kmh": str(sample.speed_kmh) if sample.speed_kmh is not None else None,
             "heading_degrees": str(sample.heading_degrees) if sample.heading_degrees is not None else None,
+            "ignition_on": sample.ignition_on,
             "captured_at": sample.captured_at.isoformat(),
         } for sample in samples]
         return Response({"trip_id": str(trip.id), "count": len(points), "points": points,
@@ -2327,7 +2340,7 @@ class DriverTripLocation(APIView):
         location = FleetTripLocation.objects.select_for_update().filter(tenant=request.tenant, trip=trip).first()
         values = {"reported_by": request.user, "source_provider": "PHONE", "latitude": latitude, "longitude": longitude,
             "accuracy_m": accuracy, "speed_kmh": (speed_mps * Decimal("3.6")) if speed_mps is not None else None,
-            "heading_degrees": heading, "captured_at": captured_at, "client_event_id": event_id}
+            "heading_degrees": heading, "ignition_on": None, "captured_at": captured_at, "client_event_id": event_id}
         try:
             with transaction.atomic():
                 sample = FleetTripLocationSample.objects.create(tenant=request.tenant, trip=trip, **values)

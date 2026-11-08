@@ -603,7 +603,7 @@ class ShipmentNotice(models.Model):
 
 
 class FleetTripLocation(models.Model):
-    """Latest phone GPS fix for an active trip; location history is not retained."""
+    """Latest GPS fix projection for a trip; append-only raw history lives in FleetTripLocationSample."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_trip_locations")
     trip = models.OneToOneField(FleetTrip, on_delete=models.CASCADE, related_name="latest_phone_location")
@@ -614,6 +614,7 @@ class FleetTripLocation(models.Model):
     accuracy_m = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     speed_kmh = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     heading_degrees = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    ignition_on = models.BooleanField(null=True, blank=True)
     captured_at = models.DateTimeField()
     received_at = models.DateTimeField(auto_now=True)
     client_event_id = models.UUIDField()
@@ -639,6 +640,7 @@ class FleetTripLocationSample(models.Model):
     accuracy_m = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     speed_kmh = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     heading_degrees = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    ignition_on = models.BooleanField(null=True, blank=True)
     captured_at = models.DateTimeField()
     received_at = models.DateTimeField(auto_now_add=True)
     client_event_id = models.UUIDField()
@@ -772,6 +774,9 @@ class FleetStopEpisode(models.Model):
     ended_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN)
     sample_count = models.PositiveIntegerField(default=1)
+    engine_idle_seconds = models.PositiveIntegerField(default=0)
+    last_ignition_on = models.BooleanField(null=True, blank=True)
+    last_speed_kmh = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     start_latitude = models.DecimalField(max_digits=9, decimal_places=6)
     start_longitude = models.DecimalField(max_digits=9, decimal_places=6)
     last_latitude = models.DecimalField(max_digits=9, decimal_places=6)

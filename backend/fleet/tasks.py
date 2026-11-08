@@ -1,3 +1,5 @@
+from partners.services import frontend_link
+from partners.instance import product_name
 from django.conf import settings
 from django.core.mail import send_mail
 
@@ -66,7 +68,7 @@ def _send_once(tenant, user, key, reminder_date, title, body, link, category="fl
                 payload={"title": title, "body": body, "link": link, "category": category},
             )
             if channel == "EMAIL":
-                sent = send_mail(title, f"{body}\n\nOpen KriyoPay: {settings.FRONTEND_URL}{link}", settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=True)
+                sent = send_mail(title, f"{body}\n\nOpen {product_name()}: {frontend_link(link)}", settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=True)
                 if sent:
                     notification.status = "SENT"
                     notification.save(update_fields=["status"])

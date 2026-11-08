@@ -1,3 +1,4 @@
+from partners.services import frontend_link
 import hashlib
 import secrets
 import re
@@ -46,7 +47,7 @@ class ShipmentLinks(APIView):
         raw=secrets.token_urlsafe(32)
         link=ShipmentAccessLink.objects.create(tenant=request.tenant,trip=trip,token_hash=hashlib.sha256(raw.encode()).hexdigest(),expires_at=timezone.now()+timedelta(days=7),created_by=request.user,notify_email=email,notify_phone=phone,consent_note=consent)
         audit(request,"SHIPMENT_LINK_CREATED",link,{"trip_id":str(trip.id),"expires_at":link.expires_at.isoformat()})
-        response=Response({"id":str(link.id),"url":f"{settings.FRONTEND_URL.rstrip('/')}/portal/shipment/{raw}","expires_at":link.expires_at.isoformat()},status=201)
+        response=Response({"id":str(link.id),"url":frontend_link(f"/portal/shipment/{raw}"),"expires_at":link.expires_at.isoformat()},status=201)
         response["Cache-Control"]="no-store"
         return response
     def delete(self,request):
@@ -75,7 +76,7 @@ class PublicShipment(APIView):
         from .access import fleet_enabled
         from accounts.workspace_access import workspace_access_denial
         link=ShipmentAccessLink.objects.filter(token_hash=hashlib.sha256(token.encode()).hexdigest(),expires_at__gt=timezone.now(),revoked_at__isnull=True,tenant__is_deleted=False).select_related("tenant","trip__transport_order__customer","trip__delivery_proof").first()
-        return link if link and not workspace_access_denial(link.tenant,method=method) and fleet_enabled(link.tenant) else None
+        return link if link and not workspace_access_denial(link.tenant,method=method) and fleet_enabled(link.tenant, "fleet_portal") else None
     def finalize_response(self,request,response,*args,**kwargs):
         response=super().finalize_response(request,response,*args,**kwargs)
         response["Cache-Control"]="no-store";response["Referrer-Policy"]="no-referrer";response["X-Robots-Tag"]="noindex, nofollow"

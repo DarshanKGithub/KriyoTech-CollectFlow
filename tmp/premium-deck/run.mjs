@@ -1,0 +1,1 @@
+process.env.RUNTIME_NODE_MODULES='C:/Users/Darshan Kshetri/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'; import('./build.mjs').catch(e=>{console.error(e.message);console.error(e.stack?.split('\n').slice(-6).join('\n'));process.exitCode=1;});

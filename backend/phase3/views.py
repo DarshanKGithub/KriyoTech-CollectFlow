@@ -438,7 +438,8 @@ class GoogleSignInCallback(APIView):
     @staticmethod
     def _redirect(*, error="", access="", refresh="", workspace=""):
         values = {"google_error": error} if error else {"access": access, "refresh": refresh, "workspace": workspace}
-        return HttpResponseRedirect(f"{settings.FRONTEND_BASE_URL}/login#{urllib.parse.urlencode(values)}")
+        from partners.services import frontend_link
+        return HttpResponseRedirect(f"{frontend_link('/login')}#{urllib.parse.urlencode(values)}")
 
     def get(self, request):
         if request.query_params.get("error"):
@@ -516,10 +517,10 @@ class BankReconciliation(APIView):
             account, _ = SourceAccount.objects.get_or_create(
                 scope="TENANT", tenant=request.tenant, kind="BANK", provider="BANK",
                 external_reference=test_reference, currency="INR",
-                defaults={"name": "KriyoPay Test Bank - INR", "created_by": request.user},
+                defaults={"name": "DEMO Test Bank - INR", "created_by": request.user},
             )
             if not account.active:
-                return Response({"error": "The KriyoPay Test Bank account is inactive. Reactivate it in Settlement sources."}, status=409)
+                return Response({"error": "The DEMO Test Bank account is inactive. Reactivate it in Settlement sources."}, status=409)
             feed_date = timezone.localdate()
             csv_text = "date,description,amount,reference\n" + "\n".join([
                 f"{feed_date.isoformat()},TEST CUSTOMER COLLECTION,12500.00,TEST-COLL-001",
@@ -536,7 +537,7 @@ class BankReconciliation(APIView):
                     "imported_by": request.user})
             if not created:
                 if not statement.is_test_data:
-                    return Response({"error": "A statement with this content already exists as non-test data. KriyoPay did not relabel or duplicate it."}, status=409)
+                    return Response({"error": "A statement with this content already exists as non-test data. The application did not relabel or duplicate it."}, status=409)
                 return Response({"id": str(statement.id), "account_id": str(account.id), "is_test_data": statement.is_test_data,
                     "duplicate_import": True, "imported_rows": statement.transactions.count(),
                     "message": "Today's test bank feed was already generated; no duplicate rows were created."}, status=200)
@@ -687,7 +688,8 @@ class VendorPortalInvitations(APIView):
         token = secrets.token_urlsafe(40)
         invite = VendorPortalInvite.objects.create(tenant=request.tenant, vendor=vendor, token_hash=hashlib.sha256(token.encode()).hexdigest(), expires_at=timezone.now() + timedelta(days=days), created_by=request.user)
         AuditLog.objects.create(tenant=request.tenant, actor=request.user, action="VENDOR_PORTAL_INVITE_CREATED", object_type="VendorPortalInvite", object_id=str(invite.id), metadata={"vendor_id": str(vendor.id), "expires_at": invite.expires_at.isoformat()})
-        return Response({"id": str(invite.id), "vendor": vendor.name, "expires_at": invite.expires_at, "url": f"{settings.FRONTEND_BASE_URL}/portal/{token}", "token": token}, status=201)
+        from partners.services import frontend_link
+        return Response({"id": str(invite.id), "vendor": vendor.name, "expires_at": invite.expires_at, "url": frontend_link(f"/portal/{token}"), "token": token}, status=201)
     def patch(self, request, invite_id=None):
         if not can_review(request): return Response({"error": "Finance role required"}, status=403)
         invite = VendorPortalInvite.objects.filter(tenant=request.tenant, id=invite_id, revoked_at__isnull=True).first()
@@ -991,7 +993,7 @@ class WebhookSubscriptions(APIView):
             event_type = "webhook.test"
             if event_type not in endpoint.events: return Response({"error": "Subscribe to webhook.test before sending a test"}, status=409)
             event_id = uuid.uuid4()
-            payload = {"id": event_id, "type": event_type, "created_at": timezone.now().isoformat(), "data": {"message": "KriyoPay webhook delivery test"}}
+            payload = {"id": event_id, "type": event_type, "created_at": timezone.now().isoformat(), "data": {"message": "Webhook delivery test"}}
             payload["id"] = str(event_id)
             delivery = WebhookDelivery.objects.create(tenant=request.tenant, endpoint=endpoint, event_id=event_id, event_type=event_type, payload=payload)
             return Response({"delivery_id": str(delivery.id), "status": delivery.status}, status=202)

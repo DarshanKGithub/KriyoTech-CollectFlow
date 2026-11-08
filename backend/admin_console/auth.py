@@ -33,7 +33,7 @@ class AdminTokenSerializer(TokenObtainPairSerializer):
         staff = AdminStaff.objects.select_related("user").filter(user=self.user, is_active=True).first()
         if not staff:
             AdminAuditLog.objects.create(actor=self.user, action="ADMIN_LOGIN_DENIED", metadata={"reason": "not_internal_staff"})
-            raise AuthenticationFailed("This account is not an active KriyoPay internal staff account.")
+            raise AuthenticationFailed("This account is not an active product administration staff account.")
         return login_for_staff(staff)
 
 
@@ -134,7 +134,8 @@ class AdminMFASetupView(AdminMFABase):
     def post(self, request):
         challenge, staff = self.challenge(request, "setup")
         secret = decrypt_secret(challenge.setup_secret)
-        return Response({"secret": secret, "uri": get_totp_uri(secret, staff.user.email)},
+        from partners.services import branding
+        return Response({"secret": secret, "uri": get_totp_uri(secret, staff.user.email, issuer=f"{branding()['product_name']} Admin")},
                         headers={"Cache-Control": "no-store"})
 
 

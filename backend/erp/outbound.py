@@ -1,3 +1,4 @@
+from partners.instance import product_name
 from decimal import Decimal
 from xml.etree import ElementTree as ET
 from .models import ERPRecord
@@ -165,7 +166,7 @@ def tally_xml(record):
         ET.SubElement(voucher, "VOUCHERTYPENAME").text = kind
         ET.SubElement(voucher, "VOUCHERNUMBER").text = source.get("invoice_number") or source.get("reference_number") or str(record.id)
         ET.SubElement(voucher, "PARTYLEDGERNAME").text = target["vendor_ledger"]
-        ET.SubElement(voucher, "NARRATION").text = "KriyoPay reviewed export " + str(record.id)
+        ET.SubElement(voucher, "NARRATION").text = product_name() + " reviewed export " + str(record.id)
         def entry(ledger, amount):
             row = ET.SubElement(voucher, "ALLLEDGERENTRIES.LIST")
             ET.SubElement(row, "LEDGERNAME").text = ledger

@@ -23,11 +23,13 @@ class PasswordResetRequest(APIView):
         if user:
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = default_token_generator.make_token(user)
-            reset_url = f"{settings.FRONTEND_BASE_URL}/reset-password?uid={uid}&token={token}"
+            from partners.services import frontend_link, branding
+            reset_url = frontend_link("/reset-password", {"uid": uid, "token": token})
+            product = branding()["product_name"]
             try:
                 send_mail(
-                    "Reset your KriyoPay password",
-                    f"A password reset was requested for your KriyoPay account.\n\nOpen this one-time link within 24 hours to choose a new password:\n{reset_url}\n\nIf you did not request this, you can ignore this email.",
+                    f"Reset your {product} password",
+                    f"A password reset was requested for your {product} account.\n\nOpen this one-time link within 24 hours to choose a new password:\n{reset_url}\n\nIf you did not request this, you can ignore this email.",
                     settings.DEFAULT_FROM_EMAIL,
                     [user.email],
                     fail_silently=False,

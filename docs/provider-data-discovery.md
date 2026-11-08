@@ -1,6 +1,6 @@
 # Provider and sample-data discovery
 
-Status: in progress for the first pilot. Pilot mix selected: driver phone GPS plus vehicle GPS trackers. Provider names, samples, account owners, and live access are still to be recorded. Never paste credentials, full driver/customer PII, or unredacted financial account numbers into this document.
+Status: in progress for the first pilot. Pilot mix selected: driver phone GPS plus vehicle GPS trackers. As of 5 November 2026, the operator confirmed that no tracker vendor/model has been selected yet. Provider names, samples, account owners, and live access are still to be recorded. Never paste credentials, full driver/customer PII, or unredacted financial account numbers into this document.
 
 ## Pilot profile
 
@@ -9,7 +9,7 @@ Status: in progress for the first pilot. Pilot mix selected: driver phone GPS pl
 | Pilot fleet size and branches | Not supplied | Pilot operator to confirm |
 | Operating states and routes | Not supplied | Select representative origin/destination corridors |
 | Driver phone platform and offline needs | Not supplied | Confirm Android/iOS mix, upload cadence, background limits |
-| Tracker vendor, model, protocol, and ID format | Not supplied | Identify one device family and obtain its authorized sample export/API guide |
+| Tracker vendor, model, protocol, and ID format | Not selected yet | Select one device family for the pilot and obtain its authorized sample export/API guide |
 | Fleet GPS event cadence and expected history | Not supplied | Confirm per-moving/idle cadence and retention requirement |
 | Customer delivery/POD process | Not supplied | Identify actual LR/GR/POD variants and approval workflow |
 

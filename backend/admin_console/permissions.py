@@ -4,14 +4,14 @@ from .mfa import requires_mfa, verified_session
 
 
 class IsAdminStaff(BasePermission):
-    message = "KriyoPay internal staff access is required."
+    message = "product administration staff access is required."
 
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
         staff = AdminStaff.objects.select_related("user").filter(user=request.user, is_active=True).first()
         if not staff:
-            self.message = "This account is not assigned an active KriyoPay internal staff role."
+            self.message = "This account is not assigned an active product administration staff role."
             from .models import AdminAuditLog
             AdminAuditLog.objects.create(actor=request.user, action="ADMIN_ACCESS_DENIED", object_type=view.__class__.__name__, metadata={"path": request.path, "method": request.method})
             return False

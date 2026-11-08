@@ -178,7 +178,7 @@ class Command(BaseCommand):
                 code = "RATE_VARIANCE" if i == 6 else "MISSING_GRN" if i == 8 else "DUPLICATE_INVOICE" if i == 19 else ["TAX_MISMATCH", "QTY_OVER_INVOICE", "VENDOR_NOT_APPROVED", "MANUAL_REVIEW"][([1, 11, 14, 17].index(i))]
                 InvoiceException.objects.get_or_create(tenant=tenant, invoice=invoice, code=code, defaults={"details": {"seeded": True}})
 
-    def seed_fleet(self, tenant, owner, driver_login):
+    def seed_fleet(self, tenant, owner, driver_login, *, notification_recipients=True):
         now = timezone.now()
         today = timezone.localdate()
         vehicles = []
@@ -423,7 +423,7 @@ class Command(BaseCommand):
                 "longitude": Decimal(str(longitude)), "accuracy_m": Decimal("18.00"), "speed_kmh": Decimal("46.00"),
                 "heading_degrees": Decimal("92.00"), "captured_at": now, "client_event_id": location_event_id,
             })
-            FleetGpsDevice.objects.get_or_create(provider="DEMO_TRACKER", device_id=f"KP-DEMO-GPS-{index+1:03}", defaults={
+            FleetGpsDevice.objects.get_or_create(provider="DEMO_TRACKER", device_id=f"KP-DEMO-GPS-{tenant.id.hex[:8]}-{index+1:03}", defaults={
                 "tenant": tenant, "vehicle": vehicles[index], "active": True, "created_by": owner,
             })
 
@@ -553,7 +553,8 @@ class Command(BaseCommand):
         portal_token = secrets.token_urlsafe(32)
         portal_link = ShipmentAccessLink.objects.create(tenant=tenant, trip=portal_trip,
             token_hash=hashlib.sha256(portal_token.encode()).hexdigest(),
-            notify_email="demo-recipient@deccanfresh.demo", notify_phone="+919000010001",
+            notify_email="demo-recipient@deccanfresh.demo" if notification_recipients else "",
+            notify_phone="+919000010001" if notification_recipients else "",
             consent_note=DEMO_PORTAL_NOTE, expires_at=now + timedelta(days=7), created_by=owner)
         for channel, recipient in (("EMAIL", portal_link.notify_email), ("WHATSAPP", portal_link.notify_phone)):
             event_key = "status:IN_TRANSIT"
@@ -573,8 +574,9 @@ class Command(BaseCommand):
                 defaults={"status": ReturnLoadOffer.Status.OFFERED, "proposed_amount": Decimal("28500.00") + index * Decimal("3200.00"),
                     "notes": "Synthetic return-load match for demonstration", "offered_by": owner})
 
+        from partners.services import frontend_link
         return {"vehicles": FleetVehicle.objects.filter(tenant=tenant).count(),
             "drivers": FleetDriver.objects.filter(tenant=tenant).count(), "orders": TransportOrder.objects.filter(tenant=tenant).count(),
             "trips": FleetTrip.objects.filter(tenant=tenant).count(), "invoices": TransportInvoice.objects.filter(tenant=tenant).count(),
             "locations": FleetTripLocation.objects.filter(tenant=tenant).count(),
-            "portal_url": f"{settings.FRONTEND_URL.rstrip('/')}/portal/shipment/{portal_token}"}
+            "portal_url": frontend_link(f"/portal/shipment/{portal_token}")}

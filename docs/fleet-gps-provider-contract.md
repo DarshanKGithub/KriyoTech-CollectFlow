@@ -34,11 +34,12 @@ The timestamp may be at most five minutes from server time. Event IDs are namesp
   "longitude":72.8777,
   "accuracy_m":12,
   "speed_kmh":42.5,
-  "heading_degrees":87
+  "heading_degrees":87,
+  "ignition_on":true
 }
 ```
 
-`accuracy_m`, `speed_kmh`, and `heading_degrees` are optional. Accepted timestamps are within the last 24 hours and no more than two minutes ahead. Late samples are retained without moving the latest location backward; only fresh fixes feed live stop/geofence/deviation processing. Signature failures, unknown devices, and bad events are rejected before writes.
+`accuracy_m`, `speed_kmh`, `heading_degrees`, and `ignition_on` are optional. `ignition_on` must be a JSON boolean and is stored only when the device reports it; phone GPS and missing ignition are not converted into an engine state. Engine-on stationary time is counted only across adjacent fixes that both report ignition on and speed at or below 3 km/h, with each interval capped at two minutes. Accepted timestamps are within the last 24 hours and no more than two minutes ahead. Late samples are retained without moving the latest location backward; only fresh fixes feed live stop/geofence/deviation processing. Signature failures, unknown devices, and bad events are rejected before writes.
 
 ## Retention and operations
 

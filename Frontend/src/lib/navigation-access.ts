@@ -27,6 +27,24 @@ const features: Record<string, string> = {
   "/custom-fields": "custom_fields",
 };
 const financeReaders = ["OWNER", "FINANCE", "AUDITOR"];
+const fleetModules:Record<string,string> = {
+  "/fleet/live-tracking":"fleet_tracking", "/fleet/geofences":"fleet_geofencing",
+  "/fleet/dispatch":"fleet_dispatch", "/fleet/dispatch-planner":"fleet_dispatch",
+  "/fleet/trips":"fleet_trips", "/fleet/create-trip":"fleet_trips",
+  "/fleet/trucks":"fleet_assets", "/fleet/drivers":"fleet_assets",
+  "/fleet/fuel":"fleet_fuel", "/fleet/maintenance":"fleet_maintenance", "/fleet/reliability":"fleet_maintenance",
+  "/fleet/documents":"fleet_documents", "/fleet/truck-documents":"fleet_documents",
+  "/fleet/orders":"fleet_orders", "/fleet/customers":"fleet_orders",
+  "/fleet/return-loads":"fleet_return_loads", "/fleet/booking-history":"fleet_return_loads",
+  "/fleet/dock-schedule":"fleet_docks", "/fleet/exception-center":"fleet_exceptions",
+  "/fleet/alerts":"fleet_exceptions", "/fleet/follow-ups":"fleet_exceptions",
+  "/fleet/customer-portal":"fleet_portal", "/fleet/customer-notifications":"fleet_notifications",
+  "/fleet/operational-reports":"fleet_reports", "/fleet/trip-reports":"fleet_reports", "/fleet/revenue-leakage":"fleet_reports",
+  "/fleet/driver":"fleet_driver_app", "/fleet/driver-salaries":"fleet_driver_finance",
+  "/fleet/finance-settings":"fleet_driver_finance", "/fleet/customer-invoices":"fleet_customer_billing",
+  "/fleet/freight-reconciliation":"fleet_freight_reconciliation",
+  "/settlements":"settlement_review",
+};
 const roles: Record<string, string[]> = {
   "/integrations/erp": financeReaders,
   "/settlements": financeReaders,
@@ -62,6 +80,8 @@ export function canShowNavigation(href: string, access: NavigationAccess | null)
   const featurePath = Object.keys(features).sort((a,b)=>b.length-a.length).find(route=>path===route||path.startsWith(`${route}/`));
   if (access.role === "DRIVER" && path !== "/fleet/driver") return false;
   if (rolePath && !roles[rolePath].includes(access.role)) return false;
+  const modulePath=Object.keys(fleetModules).sort((a,b)=>b.length-a.length).find(route=>path===route||path.startsWith(`${route}/`));
+  if(modulePath && access.entitlements?.features?.[fleetModules[modulePath]]?.enabled === false) return false;
   const feature = featurePath ? features[featurePath] : undefined;
   return !feature || access.entitlements?.features?.[feature]?.enabled === true;
 }

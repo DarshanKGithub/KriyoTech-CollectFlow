@@ -85,7 +85,7 @@ export default function ShipmentLinksPage() {
         <Stack direction="row" spacing={1} sx={{ mt: 2, p: 1.5, borderRadius: 2, bgcolor: "action.hover", color: "text.secondary", alignItems: "flex-start" }}><ShieldCheck size={16}/><Typography variant="caption">Anyone with the link can view the shipment until it expires or you revoke it.</Typography></Stack>
       </Paper>
       <Stack spacing={1.5}>
-        {url && <Paper variant="outlined" sx={{ p: 2 }}><Stack direction="row" spacing={1} sx={{ alignItems: "center", mb: 1 }}><Check size={16} color="#16835f"/><Typography variant="subtitle2">New tracking link</Typography></Stack><Stack direction={{ xs: "column", sm: "row" }} spacing={1}><TextField size="small" fullWidth value={url} slotProps={{ htmlInput: { readOnly: true, "aria-label": "Created tracking link" } }}/><Button variant="outlined" startIcon={<Copy size={15}/>} onClick={() => void copyLink()}>Copy</Button></Stack></Paper>}
+        {url && <Paper variant="outlined" sx={{ p: 2 }}><Stack direction="row" spacing={1} sx={{ alignItems: "center", mb: 1 }}><Check size={16} color="#16734A"/><Typography variant="subtitle2">New tracking link</Typography></Stack><Stack direction={{ xs: "column", sm: "row" }} spacing={1}><TextField size="small" fullWidth value={url} slotProps={{ htmlInput: { readOnly: true, "aria-label": "Created tracking link" } }}/><Button variant="outlined" startIcon={<Copy size={15}/>} onClick={() => void copyLink()}>Copy</Button></Stack></Paper>}
         <Paper variant="outlined" sx={{ overflow: "hidden" }}>
           <Box sx={{ p: 2, borderBottom: 1, borderColor: "divider" }}><Typography variant="subtitle1">Issued links</Typography><Typography variant="caption" color="text.secondary">Revoke access at any time.</Typography></Box>
           <Stack>
@@ -93,7 +93,7 @@ export default function ShipmentLinksPage() {
               <Box sx={{ minWidth: 0 }}><Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}><Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{link.trip}</Typography><Chip size="small" color={link.revoked ? "default" : "success"} label={link.revoked ? "Revoked" : "Active"}/></Stack><Typography variant="caption" color="text.secondary" sx={{ display: "flex", alignItems: "center", gap: .5, mt: .5 }}><RefreshCw size={12}/>{link.revoked ? "Access disabled" : `Expires ${new Date(link.expires_at).toLocaleString()}`}</Typography></Box>
               <Button color="error" variant="outlined" size="small" startIcon={<XCircle size={15}/>} disabled={busy || link.revoked} onClick={() => void revoke(link.id)}>Revoke access</Button>
             </Stack>)}
-            {!loading && links.length === 0 && <Box sx={{ p: 5, textAlign: "center" }}><Link2 size={24} color="#94a3b8"/><Typography variant="subtitle2" sx={{ mt: 1 }}>No tracking links yet</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>Create a private link for an active shipment to share delivery progress.</Typography></Box>}
+            {!loading && links.length === 0 && <Box sx={{ p: 5, textAlign: "center" }}><Link2 size={24} color="#9C9D89"/><Typography variant="subtitle2" sx={{ mt: 1 }}>No tracking links yet</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>Create a private link for an active shipment to share delivery progress.</Typography></Box>}
             {loading && <Typography variant="body2" color="text.secondary" sx={{ p: 3 }}>Loading issued links…</Typography>}
           </Stack>
         </Paper>

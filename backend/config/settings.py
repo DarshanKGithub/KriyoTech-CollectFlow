@@ -16,6 +16,7 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "unsafe-local-development-key")
 DEBUG = os.getenv("DJANGO_DEBUG", "0") == "1"
 ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 INSTALLED_APPS = [
+    "partners",
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
     "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles",
     "corsheaders", "rest_framework", "rest_framework_simplejwt", "rest_framework_simplejwt.token_blacklist", "django_filters",
@@ -77,11 +78,13 @@ STATIC_URL = "static/"
 MEDIA_ROOT = BASE_DIR / "media"
 MEDIA_URL = "media/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-REST_FRAMEWORK = {"DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework_simplejwt.authentication.JWTAuthentication"],
+REST_FRAMEWORK = {"DEFAULT_AUTHENTICATION_CLASSES": ["partners.authentication.KriyoPayJWTAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_FILTER_BACKENDS": ["django_filters.rest_framework.DjangoFilterBackend", "rest_framework.filters.OrderingFilter"],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination", "PAGE_SIZE": 25}
 SIMPLE_JWT = {
+    "TOKEN_REFRESH_SERIALIZER": "partners.authentication.KriyoPayTokenRefreshSerializer",
+    "TOKEN_BLACKLIST_SERIALIZER": "partners.authentication.KriyoPayTokenBlacklistSerializer",
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(os.getenv("JWT_ACCESS_TOKEN_MINUTES", "30"))),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.getenv("JWT_REFRESH_TOKEN_DAYS", "14"))),
     "ROTATE_REFRESH_TOKENS": True,
@@ -134,3 +137,4 @@ RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
 RAZORPAY_API_BASE_URL = os.getenv("RAZORPAY_API_BASE_URL", "https://api.razorpay.com/v1")
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {"vendor_portal": "60/hour", "gmail_oauth_callback": "60/hour", "google_signin_start": "60/hour", "google_signin_callback": "60/hour", "admin_login": "10/hour", "password_reset": "5/hour"}
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["admin_mfa"] = "30/hour"
+

@@ -18,7 +18,7 @@ from tenants.models import Tenant
 from .models import AdminAuditLog, AdminStaff, BillingInvoice, Feature, Payment, PaymentRefund, Plan, PlanFeature, Subscription, TenantFeatureOverride, TenantUsage
 from accounts.permissions import HasTenantMembership
 from .permissions import IsAdminStaff
-from .serializers import AuditSerializer, BillingInvoiceSerializer, FeatureSerializer, PaymentSerializer, PlanSerializer, RefundSerializer, SubscriptionSerializer, TenantSerializer, UsageSerializer
+from .serializers import AuditSerializer, BillingInvoiceSerializer, FeaturePricingSerializer, FeatureSerializer, PaymentSerializer, PlanSerializer, RefundSerializer, SubscriptionSerializer, TenantSerializer, UsageSerializer
 from .services import entitlements_for
 from .billing import GatewayError, GatewayUnavailable, activate_paid_subscription, gateway_configured, razorpay_request, verify_checkout_signature, verify_webhook_signature
 
@@ -31,7 +31,9 @@ def audit(request, action, tenant=None, obj=None, reason="", metadata=None):
 class AdminMe(APIView):
     permission_classes = [IsAdminStaff]
     def get(self, request):
-        return Response({"email": request.user.email, "name": request.user.get_full_name(), "role": request.admin_staff.role, "razorpay_configured": gateway_configured()})
+        from partners.instance import platform_capable
+        from partners.services import branding
+        return Response({"email": request.user.email, "name": request.user.get_full_name(), "role": request.admin_staff.role, "razorpay_configured": gateway_configured(), "is_platform": platform_capable(), "brand": branding()})
 
 
 class AdminDashboard(APIView):
@@ -110,8 +112,9 @@ class CompanyListCreate(APIView):
         invite_token = secrets.token_urlsafe(32)
         invitation = Invitation.objects.create(tenant=tenant, email=email, role=Membership.Role.OWNER,
             token_hash=hashlib.sha256(invite_token.encode()).hexdigest(), expires_at=timezone.now()+timedelta(days=7), invited_by=request.user)
-        accept_url = f"{settings.FRONTEND_BASE_URL}/invite/accept?token={invite_token}"
-        sent_count = send_mail(f"Set up your KriyoPay account for {tenant.name}", f"Hello {owner_name},\n\nYour workspace has been created. Set your password and activate access here (link expires in 7 days):\n{accept_url}\n", settings.DEFAULT_FROM_EMAIL, [email], fail_silently=True)
+        from partners.services import frontend_link, branding
+        accept_url = frontend_link("/invite/accept", {"token": invite_token})
+        sent_count = send_mail(f"Set up your {branding()['product_name']} account for {tenant.name}", f"Hello {owner_name},\n\nYour workspace has been created. Set your password and activate access here (link expires in 7 days):\n{accept_url}\n", settings.DEFAULT_FROM_EMAIL, [email], fail_silently=True)
         status_value = Subscription.Status.TRIAL if data.get("trial_enabled", True) and not collect_payment else Subscription.Status.ONBOARDING
         days = trial_days if status_value == Subscription.Status.TRIAL else None
         ends = timezone.now() + timedelta(days=days) if days else None
@@ -246,6 +249,31 @@ class Features(APIView):
         return Response({"features": features, "plan_entitlements": [{"plan_id": row.plan_id, "feature_key": row.feature.key, "enabled": row.enabled, "limit_value": row.limit_value, "limit_period": row.limit_period} for row in plan_rows]})
 
 
+class FeaturePricing(APIView):
+    permission_classes = [IsAdminStaff]
+    allowed_roles = [AdminStaff.Role.SUPER_ADMIN]
+
+    @transaction.atomic
+    def patch(self, request, feature_key):
+        if not isinstance(request.data, dict):
+            return Response({"error": "Send a JSON object."}, status=400)
+        feature = Feature.objects.select_for_update().filter(key=feature_key).first()
+        if feature is None:
+            return Response({"error": "Feature not found."}, status=404)
+        serializer = FeaturePricingSerializer(feature, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+        if "reason" not in serializer.validated_data:
+            return Response({"error": "Provide a reason between 8 and 500 characters."}, status=400)
+        before = {field: getattr(feature, field) for field in ("solution_name", "monthly_price", "price_basis")}
+        reason = serializer.validated_data.pop("reason")
+        serializer.save()
+        after = {field: getattr(feature, field) for field in before}
+        audit(request, "FEATURE_PRICING_UPDATED", obj=feature, reason=reason,
+            metadata={"feature_key": feature.key, "before": before, "after": after})
+        return Response(FeatureSerializer(feature).data)
+
+
 class Subscriptions(APIView):
     permission_classes = [IsAdminStaff]
     def get(self, request):
@@ -367,7 +395,7 @@ class RazorpayCreateOrder(APIView):
         cycle = request.data.get("billing_cycle", subscription.billing_cycle)
         if not plan or cycle not in Subscription.Cycle.values: return Response({"error": "Select a valid active plan and billing cycle."}, status=400)
         amount = {Subscription.Cycle.MONTHLY: plan.monthly_price, Subscription.Cycle.QUARTERLY: plan.quarterly_price, Subscription.Cycle.ANNUAL: plan.annual_price}[cycle]
-        if amount is None or amount <= 0: return Response({"error": "Contact KriyoPay billing for custom pricing."}, status=400)
+        if amount is None or amount <= 0: return Response({"error": "Contact your product billing team for custom pricing."}, status=400)
         pending = Payment.objects.filter(tenant=request.tenant, subscription=subscription, requested_plan=plan, billing_cycle=cycle, status=Payment.Status.PENDING).order_by("-created_at").first()
         if pending:
             return Response({"payment_id": str(pending.id), "order_id": pending.razorpay_order_id, "amount": pending.amount,

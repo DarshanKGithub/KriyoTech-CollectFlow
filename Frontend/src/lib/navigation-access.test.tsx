@@ -7,6 +7,13 @@ function access(features: Record<string, boolean>, role = "OWNER"): NavigationAc
 }
 
 describe("workspace navigation access", () => {
+  it("checks fleet subfeatures and settlement review separately from their parent access", () => {
+    const profile=access({fleet_management:true,fleet_fuel:false,fleet_tracking:true,payment_tracking:true,settlement_review:false});
+    expect(canShowNavigation("/fleet/fuel",profile)).toBe(false);
+    expect(canShowNavigation("/fleet/live-tracking",profile)).toBe(true);
+    expect(canShowNavigation("/settlements",profile)).toBe(false);
+    expect(canShowNavigation("/fleet/fuel",access({fleet_management:false,fleet_fuel:true}))).toBe(false);
+  });
   it("hides gated links until access has loaded", () => {
     expect(canShowNavigation("/fleet", null)).toBe(false);
     expect(canShowNavigation("/fleet", access({}))).toBe(false);

@@ -1,13 +1,14 @@
+import { authStorage, partnerHeaders, partnerKey } from "@/lib/partner";
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1").replace(/\/+$/, "");
-export function workspaceKey() { return typeof window === "undefined" ? "" : localStorage.getItem("kriyopay_workspace") || ""; }
-export function accessToken() { return typeof window === "undefined" ? "" : localStorage.getItem("kriyopay_access") || ""; }
-export function refreshToken() { return typeof window === "undefined" ? "" : localStorage.getItem("kriyopay_refresh") || ""; }
+export function workspaceKey() { return typeof window === "undefined" ? "" : authStorage.getItem("kriyopay_workspace") || ""; }
+export function accessToken() { return typeof window === "undefined" ? "" : authStorage.getItem("kriyopay_access") || ""; }
+export function refreshToken() { return typeof window === "undefined" ? "" : authStorage.getItem("kriyopay_refresh") || ""; }
 
 let refreshInFlight: Promise<string | null> | null = null;
 
 function expireSession() {
   if (typeof window === "undefined") return;
-  ["kriyopay_access", "kriyopay_refresh", "kriyopay_workspace"].forEach(key => localStorage.removeItem(key));
+  ["kriyopay_access", "kriyopay_refresh", "kriyopay_workspace"].forEach(key => authStorage.removeItem(key));
   if (window.location.pathname === "/login") return;
   const next = `${window.location.pathname}${window.location.search}${window.location.hash}`;
   window.location.assign(`/login?reason=session_expired&next=${encodeURIComponent(next)}`);
@@ -24,15 +25,15 @@ function refreshAccessToken(): Promise<string | null> {
     try {
       const response = await fetch(`${API_URL}/auth/refresh`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...partnerHeaders() },
         body: JSON.stringify({ refresh }),
         cache: "no-store",
       });
       if (!response.ok) { expireSession(); return null; }
       const data = await response.json() as { access?: string; refresh?: string };
       if (!data.access) { expireSession(); return null; }
-      localStorage.setItem("kriyopay_access", data.access);
-      if (data.refresh) localStorage.setItem("kriyopay_refresh", data.refresh);
+      authStorage.setItem("kriyopay_access", data.access);
+      if (data.refresh) authStorage.setItem("kriyopay_refresh", data.refresh);
       return data.access;
     } catch {
       // Network outages should not sign a user out; the original request can be retried later.
@@ -65,7 +66,7 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
     if (method !== "GET") recentReads.clear();
     return response;
   }
-  const key = JSON.stringify([path, workspaceKey(), accessToken()]);
+  const key = JSON.stringify([partnerKey(), path, workspaceKey(), accessToken()]);
   const now = Date.now();
   for (const [cacheKey, entry] of recentReads) {
     if (entry.expiresAt <= now) recentReads.delete(cacheKey);
@@ -92,6 +93,7 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
 async function performFetch(path: string, init: RequestInit) {
   const makeHeaders = (token: string) => {
     const headers = new Headers(init.headers);
+    Object.entries(partnerHeaders()).forEach(([key,value]) => headers.set(key,value));
     if (token) headers.set("Authorization", `Bearer ${token}`);
     const workspace = workspaceKey();
     if (workspace) headers.set("X-Workspace", workspace);

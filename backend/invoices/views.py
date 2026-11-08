@@ -171,8 +171,9 @@ class InviteUser(APIView):
                 return Response({"error": {"code": "USER_LIMIT_REACHED", "message": "Your plan's active user limit has been reached."}}, status=403)
         token = secrets.token_urlsafe(32)
         invitation = Invitation.objects.create(tenant=request.tenant, email=email, role=role, token_hash=hashlib.sha256(token.encode()).hexdigest(), expires_at=timezone.now()+timedelta(days=7), invited_by=request.user)
-        accept_url = f"{settings.FRONTEND_BASE_URL}/invite/accept?token={token}"
-        send_mail(f"Invitation to {request.tenant.name}", f"Join your KriyoPay workspace: {accept_url}", None, [email], fail_silently=True)
+        from partners.services import frontend_link, branding
+        accept_url = frontend_link("/invite/accept", {"token": token})
+        send_mail(f"Invitation to {request.tenant.name}", f"Join your {branding()['product_name']} workspace: {accept_url}", None, [email], fail_silently=True)
         AuditLog.objects.create(tenant=request.tenant, actor=request.user, action="USER_INVITED", object_type="Invitation", object_id=str(invitation.id), metadata={"email": email, "role": role})
         return Response({"id": str(invitation.id), "email": email, "role": role, "expires_at": invitation.expires_at}, status=201)
 

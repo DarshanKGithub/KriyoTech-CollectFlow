@@ -88,13 +88,24 @@ def record_motion(trip,location):
     if not episode:
         episode=FleetStopEpisode.objects.create(tenant_id=trip.tenant_id,trip_id=trip.id,
             started_at=now,last_sample_at=now,start_latitude=location.latitude,start_longitude=location.longitude,
-            last_latitude=location.latitude,last_longitude=location.longitude)
+            last_latitude=location.latitude,last_longitude=location.longitude,
+            last_ignition_on=getattr(location,"ignition_on",None),last_speed_kmh=speed)
     else:
+        idle_interval=0
+        previous_speed=episode.last_speed_kmh
+        ignition_on=getattr(location,"ignition_on",None)
+        if (episode.last_ignition_on is True and ignition_on is True and previous_speed is not None and speed is not None
+                and previous_speed<=STOP_MAX_SPEED_KMH and speed<=STOP_MAX_SPEED_KMH):
+            idle_interval=max(0,min(int((now-episode.last_sample_at).total_seconds()),int(STOP_MAX_SAMPLE_GAP.total_seconds())))
         episode.last_sample_at=now
         episode.last_latitude=location.latitude
         episode.last_longitude=location.longitude
         episode.sample_count+=1
-        episode.save(update_fields=["last_sample_at","last_latitude","last_longitude","sample_count"])
+        episode.engine_idle_seconds+=idle_interval
+        episode.last_ignition_on=getattr(location,"ignition_on",None)
+        episode.last_speed_kmh=speed
+        episode.save(update_fields=["last_sample_at","last_latitude","last_longitude","sample_count",
+            "engine_idle_seconds","last_ignition_on","last_speed_kmh"])
     if (now-episode.started_at)<STOP_MIN_DURATION or episode.exception_case_id:
         return episode
     inside_site=FleetGeofenceTripState.objects.filter(tenant_id=trip.tenant_id,trip_id=trip.id,
@@ -113,8 +124,10 @@ def record_motion(trip,location):
             "episode_id":str(episode.id),"observed_since":episode.started_at.isoformat(),
             "observed_until":now.isoformat(),"sample_count":episode.sample_count,
             "duration_seconds":int((now-episode.started_at).total_seconds()),
+            "engine_idle_seconds":episode.engine_idle_seconds,
+            "engine_idle_evidence":"Adjacent GPS samples with ignition_on=true and speed at or below 3 km/h; intervals are capped at two minutes.",
             "latitude":str(location.latitude),"longitude":str(location.longitude),"message":message,
-            "classification":"GPS stationary review signal; this does not establish an unauthorized stop or engine idle."},
+            "classification":"GPS stationary review signal; this does not establish an unauthorized stop. Engine-idle seconds are counted only where adjacent device samples include ignition_on=true and speed at or below 3 km/h."},
         "due_at":now+timedelta(minutes=30)})
     episode.exception_case=case
     episode.save(update_fields=["inside_geofence","exception_case"])

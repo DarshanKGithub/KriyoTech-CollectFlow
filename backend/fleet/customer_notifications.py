@@ -33,7 +33,7 @@ def queue_customer_notices():
     count=0;now=timezone.now()
     links=ShipmentAccessLink.objects.filter(revoked_at__isnull=True,expires_at__gt=now,tenant__is_deleted=False).select_related("tenant","trip__transport_order")
     for link in links:
-        if not workspace_is_operational(link.tenant) or not fleet_enabled(link.tenant):continue
+        if not workspace_is_operational(link.tenant) or not fleet_enabled(link.tenant, "fleet_notifications"):continue
         trip=link.trip;order=trip.transport_order
         if not order or not link.consent_note:continue
         events=[(f"status:{order.status}",order.status)]
@@ -109,7 +109,7 @@ def process_notices(notice_id=None):
             notice=ShipmentNotice.objects.select_for_update(of=("self",)).select_related("link__tenant").get(id=notice_id)
             if notice.status!="PENDING":continue
             recipient=notice.link.notify_email if notice.channel=="EMAIL" else notice.link.notify_phone
-            if not workspace_is_operational(notice.link.tenant) or not fleet_enabled(notice.link.tenant) or notice.link.revoked_at or notice.link.expires_at<=now or not recipient or recipient!=notice.payload["recipient"]:
+            if not workspace_is_operational(notice.link.tenant) or not fleet_enabled(notice.link.tenant, "fleet_notifications") or notice.link.revoked_at or notice.link.expires_at<=now or not recipient or recipient!=notice.payload["recipient"]:
                 notice.status="CANCELLED";notice.save(update_fields=["status","updated_at"]);continue
             notice.status="PROCESSING";notice.attempts+=1;notice.save(update_fields=["status","attempts","updated_at"])
         status,error,reference=send_notice(notice)

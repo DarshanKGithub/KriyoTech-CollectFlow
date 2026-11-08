@@ -1,3 +1,4 @@
+from partners.instance import export_prefix
 import json
 import re
 from urllib.parse import urlsplit
@@ -265,7 +266,7 @@ class RecordDownload(RecordDetail):
         else:
             response = HttpResponse(json.dumps(record.payload, indent=2), content_type="application/json")
             extension = "json"
-        response["Content-Disposition"] = f'attachment; filename="kriyopay-{record.resource}-{record.id}.{extension}"'
+        response["Content-Disposition"] = f'attachment; filename="{export_prefix()}-{record.resource}-{record.id}.{extension}"'
         log(request, "ERP_REVIEW_PACKAGE_DOWNLOADED", record.connection, record)
         return response
 

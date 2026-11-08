@@ -29,6 +29,29 @@ class FeatureSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+class FeaturePricingSerializer(serializers.ModelSerializer):
+    from .solution_catalog import SOLUTIONS
+    solution_name = serializers.ChoiceField(choices=SOLUTIONS, allow_blank=True, required=False)
+    price_basis = serializers.ChoiceField(choices=["COMPANY"], required=False)
+    monthly_price = serializers.IntegerField(min_value=0, max_value=999999999999, allow_null=True, required=False)
+    reason = serializers.CharField(min_length=8, max_length=500, write_only=True)
+
+    class Meta:
+        model = Feature
+        fields = ["solution_name", "monthly_price", "price_basis", "reason"]
+
+    def validate(self, attrs):
+        unknown = set(self.initial_data) - set(self.fields)
+        if unknown:
+            raise serializers.ValidationError("Only solution_name, monthly_price, price_basis and reason are accepted.")
+        raw_price = self.initial_data.get("monthly_price")
+        if raw_price is not None and (isinstance(raw_price, bool) or not isinstance(raw_price, int)):
+            raise serializers.ValidationError({"monthly_price": "Send an integer amount in paise or null."})
+        if len(attrs) == 1:
+            raise serializers.ValidationError("Provide at least one catalog field to update.")
+        return attrs
+
+
 class SubscriptionSerializer(serializers.ModelSerializer):
     tenant_name = serializers.CharField(source="tenant.name", read_only=True)
     plan_name = serializers.CharField(source="plan.name", read_only=True)

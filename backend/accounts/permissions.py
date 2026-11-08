@@ -147,6 +147,18 @@ class HasTenantMembership(BasePermission):
                 entitlement = entitlements_for(membership.tenant)["features"].get(feature_key)
                 if not entitlement or not entitlement.get("enabled"):
                     raise PermissionDenied(f"Your current plan does not include {feature_key.replace('_', ' ')}.")
+                if feature_key == "fleet_management":
+                    from admin_console.solution_catalog import fleet_feature_for_path
+                    module_key = fleet_feature_for_path(path.removeprefix("/api/v1/fleet/"))
+                    # Directories and trip/order lists are shared reference data for enabled operational workflows.
+                    shared_read = method in SAFE_METHODS and path.rstrip("/") in {
+                        "/api/v1/fleet/vehicles", "/api/v1/fleet/drivers", "/api/v1/fleet/customers",
+                        "/api/v1/fleet/orders", "/api/v1/fleet/trips",
+                    }
+                    if module_key and not shared_read and not entitlements_for(membership.tenant)["features"].get(module_key, {}).get("enabled"):
+                        raise PermissionDenied("This fleet feature is disabled for your company. Contact your administrator.")
+                if path.startswith("/api/v1/settlements/") and not entitlements_for(membership.tenant)["features"].get("settlement_review", {}).get("enabled", True):
+                    raise PermissionDenied("Settlement report review is disabled for your company.")
                 if feature_key == "invoice_upload":
                     period_start = timezone.localdate().replace(day=1)
                     usage = TenantUsage.objects.filter(tenant=membership.tenant, period_start=period_start, metric="invoices_uploaded").values_list("used_count", flat=True).first() or 0
