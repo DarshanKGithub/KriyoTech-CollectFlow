@@ -8,6 +8,7 @@ from .geofence_views import FleetGeofenceDetail, FleetGeofenceEvents, FleetGeofe
 from .gps_providers import FleetGpsDeviceDetail, FleetGpsDevices, FleetGpsProviderIntake
 from .dispatch import FleetDispatchRecommendations
 from .dispatch_planning import FleetDispatchPlanOptimize, FleetDispatchPlanConfirm, FleetDriverSchedules, FleetDriverScheduleDetail, FleetTripStopAction
+from .lrs import LorryReceiptCancel, LorryReceipts
 
 from .views import DockAppointmentAction, DockAppointments, DriverAdvances, DriverAdvanceRecoveries, DriverLedgerExport, DriverPayPolicies, DriverPayPolicyDetail, DriverSalaryAdjustments, DriverSalaryAdjustmentReview, DriverSalaries, DriverSalaryDetail, DriverSalaryPayments, DriverSalaryReview, DriverTripEarnings, DriverTripLocation, FleetAlerts, FleetCustomers, FleetCustomerDetail, FleetDashboard, FleetDirectory, FleetDirectoryDetail, FleetDocumentUpload, FleetDocks, FleetFollowUps, FleetLiveLocations, FleetTripLocationHistory, FleetLogisticsDocuments, FleetMaintenance, FleetOperationalReports, FleetRevenueLeakage, FleetVehicleDocumentDownload, FleetVehicleDocuments, FreightImportRowAction, FreightImports, FleetReminderSettings, FleetTripReport, MyDriverTrips, ReturnLoadOfferAction, ReturnLoadSuggestions, TransportInvoices, TransportInvoiceIssue, TransportInvoiceCollections, TransportOrders, TripAction, TripCollection, TripDetail, TripLines
 
@@ -58,6 +59,8 @@ urlpatterns = [
     path("dock-appointments", DockAppointments.as_view()),
     path("dock-appointments/<uuid:appointment_id>/<str:action>", DockAppointmentAction.as_view()),
     path("customer-invoices", TransportInvoices.as_view()),
+    path("lorry-receipts", LorryReceipts.as_view()),
+    path("lorry-receipts/<uuid:receipt_id>/cancel", LorryReceiptCancel.as_view()),
     path("revenue-leakage", FleetRevenueLeakage.as_view()),
     path("customer-invoices/<uuid:invoice_id>/issue", TransportInvoiceIssue.as_view()),
     path("customer-invoices/<uuid:invoice_id>/collections", TransportInvoiceCollections.as_view()),

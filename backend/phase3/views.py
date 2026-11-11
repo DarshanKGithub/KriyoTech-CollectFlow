@@ -162,6 +162,9 @@ class MonthEndChecklistAPI(APIView):
         return Response({"id": str(item.id), "period": item.period, "item_key": item.item_key, "status": item.status, "reviewed_at": item.reviewed_at})
 
 
+from .mobile_oauth import start_mobile_state, read_mobile_state, mobile_signin_redirect
+
+
 class GmailIntegrationAPI(APIView):
     permission_classes = [HasTenantMembership]
 
@@ -179,7 +182,7 @@ class GmailIntegrationAPI(APIView):
         if request.membership.role not in ("OWNER", "FINANCE"):
             return Response({"error": "Finance role required to connect Gmail."}, status=403)
         GmailOAuthState.objects.filter(expires_at__lt=timezone.now() - timedelta(days=1)).delete()
-        raw_state = secrets.token_urlsafe(36)
+        raw_state = start_mobile_state(request)
         try:
             url = gmail_authorization_url(raw_state)
         except RuntimeError as exc:
@@ -213,7 +216,7 @@ class GmailOAuthCallback(APIView):
     def post(self, request):
         raw_state = str(request.data.get("state", ""))
         code = str(request.data.get("code", ""))
-        if not raw_state or len(raw_state) > 256 or not code or len(code) > 4096:
+        if not raw_state or len(raw_state) > 2048 or not code or len(code) > 4096:
             return Response({"error": "Gmail authorization response is incomplete. Try connecting again."}, status=400)
         state_hash = hashlib.sha256(raw_state.encode()).hexdigest()
         with transaction.atomic():
@@ -247,7 +250,9 @@ class GmailOAuthCallback(APIView):
         })
         AuditLog.objects.create(tenant=state.tenant, actor=state.user, action="GMAIL_ACCOUNT_CONNECTED",
             object_type="GmailConnection", object_id=str(connection.id), metadata={"email": connection.email, "created": created, "scopes": [GMAIL_READONLY_SCOPE]})
-        return Response({"connected": True, "email": connection.email, "scopes": [GMAIL_READONLY_SCOPE]})
+        mobile = read_mobile_state(raw_state)
+        return Response({"connected": True, "email": connection.email, "scopes": [GMAIL_READONLY_SCOPE],
+            **({"mobile_return_uri": mobile["return_uri"]} if mobile else {})})
 
 
 class GmailSync(APIView):
@@ -419,7 +424,7 @@ class GoogleSignInStart(APIView):
         if not tenant:
             return Response({"error": "Enter a valid workspace ID before signing in with Google."}, status=400)
         GoogleSignInState.objects.filter(expires_at__lt=timezone.now() - timedelta(days=1)).delete()
-        raw_state = secrets.token_urlsafe(36)
+        raw_state = start_mobile_state(request)
         try:
             url = signin_authorization_url(raw_state)
         except RuntimeError as exc:
@@ -435,18 +440,21 @@ class GoogleSignInCallback(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "google_signin_callback"
 
-    @staticmethod
-    def _redirect(*, error="", access="", refresh="", workspace=""):
+    def _redirect(self, *, error="", access="", refresh="", workspace=""):
+        native = mobile_signin_redirect(getattr(self, "mobile_state", None), error=error, access=access, refresh=refresh, workspace=workspace)
+        if native is not None:
+            return native
         values = {"google_error": error} if error else {"access": access, "refresh": refresh, "workspace": workspace}
         from partners.services import frontend_link
         return HttpResponseRedirect(f"{frontend_link('/login')}#{urllib.parse.urlencode(values)}")
 
     def get(self, request):
+        self.mobile_state = read_mobile_state(str(request.query_params.get("state", "")))
         if request.query_params.get("error"):
             return self._redirect(error="authorization_cancelled")
         code = str(request.query_params.get("code", ""))
         raw_state = str(request.query_params.get("state", ""))
-        if not code or len(code) > 4096 or not raw_state or len(raw_state) > 256:
+        if not code or len(code) > 4096 or not raw_state or len(raw_state) > 2048:
             return self._redirect(error="authorization_invalid")
         state_hash = hashlib.sha256(raw_state.encode()).hexdigest()
         with transaction.atomic():

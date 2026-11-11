@@ -291,3 +291,26 @@ class RefundIntent(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=["payment", "request_key"], name="uniq_billing_refund_intent"),
                        models.CheckConstraint(condition=models.Q(amount__gt=0), name="refund_intent_positive")]
+
+
+class InvitationDelivery(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        PROCESSING = "PROCESSING", "Processing"
+        SUBMITTED = "SUBMITTED", "Submitted to email provider"
+        CONSOLE_ONLY = "CONSOLE_ONLY", "Console only"
+        FAILED = "FAILED", "Failed"
+        CANCELLED = "CANCELLED", "Cancelled"
+
+    invitation = models.OneToOneField("accounts.Invitation", on_delete=models.CASCADE, related_name="delivery")
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING, db_index=True)
+    encrypted_token = models.TextField(blank=True)
+    attempt_count = models.PositiveSmallIntegerField(default=0)
+    next_attempt_at = models.DateTimeField(default=timezone.now, db_index=True)
+    processing_token = models.UUIDField(null=True, blank=True)
+    error_message = models.CharField(max_length=300, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["status", "next_attempt_at"])]

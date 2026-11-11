@@ -1,10 +1,131 @@
 from celery import shared_task
 from django.db import transaction
+from django.core.mail import send_mail
+from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
 import uuid
+import logging
+from kombu.exceptions import KombuError
+from django.db.models import Q
 from .billing import activate_paid_subscription, razorpay_request
-from .models import Payment, RazorpayWebhookEvent
+from .invitation_delivery import reveal_token
+from .models import InvitationDelivery, Payment, RazorpayWebhookEvent
+
+logger = logging.getLogger(__name__)
+
+
+@shared_task
+def deliver_invitation(delivery_id):
+    claim_token = uuid.uuid4()
+    with transaction.atomic():
+        delivery = InvitationDelivery.objects.select_for_update().select_related(
+            "invitation__tenant"
+        ).get(pk=delivery_id)
+        now = timezone.now()
+        if delivery.status in {
+            InvitationDelivery.Status.SUBMITTED,
+            InvitationDelivery.Status.CONSOLE_ONLY,
+            InvitationDelivery.Status.CANCELLED,
+        }:
+            return delivery.status.lower()
+        if delivery.next_attempt_at > now:
+            return "retry scheduled"
+        if (
+            delivery.invitation.accepted_at
+            or delivery.invitation.tenant.is_deleted
+            or delivery.invitation.expires_at <= now
+        ):
+            delivery.status = InvitationDelivery.Status.CANCELLED
+            delivery.encrypted_token = ""
+            delivery.processing_token = None
+            delivery.error_message = ""
+            delivery.save(update_fields=["status", "encrypted_token", "processing_token", "error_message", "updated_at"])
+            return "cancelled"
+        if delivery.attempt_count >= 5:
+            delivery.status = InvitationDelivery.Status.FAILED
+            delivery.error_message = "Email delivery failed after five attempts. Resend the invitation to retry."
+            delivery.save(update_fields=["status", "error_message", "updated_at"])
+            return "attempts exhausted"
+        delivery.attempt_count += 1
+        delivery.status = InvitationDelivery.Status.PROCESSING
+        delivery.processing_token = claim_token
+        delay_seconds = min(60 * 2 ** (delivery.attempt_count - 1), 3600)
+        delivery.next_attempt_at = now + timedelta(seconds=delay_seconds)
+        delivery.error_message = ""
+        delivery.save(update_fields=[
+            "attempt_count", "status", "processing_token", "next_attempt_at", "error_message", "updated_at"
+        ])
+        invitation = delivery.invitation
+        tenant_name = invitation.tenant.name
+        recipient = invitation.email
+        owner_name = invitation.tenant.memberships.filter(
+            user__email__iexact=recipient
+        ).values_list("user__first_name", flat=True).first() or recipient
+        encrypted_token = delivery.encrypted_token
+
+    try:
+        token = reveal_token(encrypted_token)
+        from partners.services import branding, frontend_link
+
+        product_name = branding()["product_name"]
+        accept_url = frontend_link("/invite/accept", {"token": token})
+        sent = send_mail(
+            f"Set up your {product_name} account for {tenant_name}",
+            f"Hello {owner_name},\n\nYour workspace has been created. Set your password and activate access here (link expires in 7 days):\n{accept_url}\n",
+            settings.DEFAULT_FROM_EMAIL,
+            [recipient],
+            fail_silently=False,
+        )
+        if sent != 1:
+            raise RuntimeError("Email backend did not accept the invitation.")
+    except Exception:
+        with transaction.atomic():
+            delivery = InvitationDelivery.objects.select_for_update().filter(pk=delivery_id).first()
+            if delivery and delivery.status == InvitationDelivery.Status.PROCESSING and delivery.processing_token == claim_token:
+                delivery.status = InvitationDelivery.Status.FAILED
+                delivery.error_message = "Email delivery failed. The system will retry automatically; you can also resend it."
+                delivery.processing_token = None
+                delivery.save(update_fields=["status", "error_message", "processing_token", "updated_at"])
+        logger.warning("Invitation delivery %s failed; retry will be scheduled.", delivery_id)
+        return "failed"
+
+    with transaction.atomic():
+        delivery = InvitationDelivery.objects.select_for_update().get(pk=delivery_id)
+        if delivery.status != InvitationDelivery.Status.PROCESSING or delivery.processing_token != claim_token:
+            return "claim expired"
+        delivery.status = (
+            InvitationDelivery.Status.CONSOLE_ONLY
+            if settings.EMAIL_BACKEND.endswith("console.EmailBackend")
+            else InvitationDelivery.Status.SUBMITTED
+        )
+        delivery.encrypted_token = ""
+        delivery.processing_token = None
+        delivery.error_message = ""
+        delivery.save(update_fields=[
+            "status", "encrypted_token", "processing_token", "error_message", "updated_at"
+        ])
+    return delivery.status.lower()
+
+
+@shared_task
+def maintain_invitation_deliveries():
+    now = timezone.now()
+    due = InvitationDelivery.objects.filter(
+        next_attempt_at__lte=now,
+        attempt_count__lt=5,
+    ).filter(
+        Q(status__in=[InvitationDelivery.Status.PENDING, InvitationDelivery.Status.FAILED])
+        | Q(status=InvitationDelivery.Status.PROCESSING)
+    ).order_by("next_attempt_at").values_list("pk", flat=True)[:100]
+    published = 0
+    for delivery_id in due:
+        try:
+            deliver_invitation.delay(str(delivery_id))
+            published += 1
+        except KombuError:
+            logger.warning("Invitation delivery %s remains queued because the task broker is unavailable.", delivery_id)
+    return {"published": published}
 
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 5})

@@ -99,6 +99,9 @@ def test_blocking_exception_prevents_payment(workspace):
     response=s.client.post("/api/v1/payments",payment_payload(inv),format="json")
     assert response.status_code==409
     assert not Payment.objects.exists()
+    queue = s.client.get("/api/v1/invoices/?payment_queue=1&status__in=PAYMENT_READY,EXPORTED&payment_status__in=UNPAID,PARTIALLY_PAID")
+    assert queue.status_code == 200
+    assert queue.data["results"][0]["payment_hold"] == "blocking_exception"
 
 
 def test_invalid_amount_and_key_return_validation_errors_not_server_errors(workspace):
@@ -117,6 +120,12 @@ def test_partial_payment_replay_and_changed_payload_conflict(workspace):
     first=s.client.post("/api/v1/payments",payload,format="json")
     assert first.status_code==201,first.data
     inv.refresh_from_db();assert inv.payment_status=="PARTIALLY_PAID"
+    queue_url = "/api/v1/invoices/?payment_queue=1&status__in=PAYMENT_READY,EXPORTED&payment_status__in=UNPAID,PARTIALLY_PAID"
+    queue = s.client.get(queue_url)
+    assert queue.status_code == 200
+    row, = queue.data["results"]
+    assert row["id"] == str(inv.id) and row["outstanding_balance"] == "60.00"
+    assert row["payment_hold"] is None
     replay=s.client.post("/api/v1/payments",payload,format="json")
     assert replay.status_code==200 and replay.data["id"]==first.data["id"]
     changed=payment_payload(inv,"30",payload["idempotency_key"])
@@ -126,6 +135,7 @@ def test_partial_payment_replay_and_changed_payload_conflict(workspace):
     assert final.status_code==201,final.data
     inv.refresh_from_db();assert inv.payment_status=="PAID"
     assert sum(inv.payment_allocations.values_list("amount",flat=True))==100
+    assert s.client.get(queue_url).data["results"] == []
 
 
 def test_duplicate_invoice_allocations_are_combined_before_balance_check(workspace):

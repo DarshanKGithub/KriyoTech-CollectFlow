@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { UiAlert, UiButton, UiH1, UiH2, UiMain, UiSection, UiText } from "@/components/product-ui";
+import { ArrowRight, MapPin, Truck } from "lucide-react";
 
 type Order = { id: string; order_number: string; customer: { name: string }; origin: string; destination: string; load_quantity: string | null; load_unit: string; status: string; pickup_due_at: string | null; delivery_due_at: string | null };
 type RouteStop = { order_id: string; order_number: string; kind: string; address: string; planned_at: string | null };
@@ -14,6 +15,26 @@ type Schedule = { id: string; driver_id: string; driver: string; kind: string; s
 type Driver = { id: string; name: string };
 const field = "w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-forest";
 const isoLocal = (d: Date) => { const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return local.toISOString().slice(0, 16); };
+const dateTime = (value: string) => new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+
+function RoutePreview({ route }: { route: Route }) {
+  return <div className="mt-3">
+    <p className="text-xs text-slate-600">
+      {route.distance_km == null ? "Distance unavailable" : `${route.distance_km} km · ${route.provider_status === "UPDATED" ? "Road estimate" : "Straight-line estimate"}`}
+      {route.estimated_travel_minutes != null && ` · ${route.estimated_travel_minutes} min estimated`}
+    </p>
+    <ol className="mt-3 space-y-3">
+      {route.stops.map((stop, index) => <li key={`${stop.order_id}-${stop.kind}-${index}`} className="flex items-start gap-3">
+        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-emerald-50 text-xs font-bold text-forest">{index + 1}</span>
+        <div className="min-w-0 break-words">
+          <p className="text-sm font-semibold">{stop.kind === "PICKUP" ? "Pickup" : stop.kind === "DELIVERY" ? "Delivery" : stop.kind} · {stop.address}</p>
+          <p className="text-xs text-slate-600">{stop.order_number} · {stop.planned_at ? dateTime(stop.planned_at) : "Time not estimated"}</p>
+        </div>
+      </li>)}
+    </ol>
+    {!!route.warnings?.length && <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-amber-900">{route.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
+  </div>;
+}
 
 export default function DispatchPlannerPage() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -29,6 +50,8 @@ export default function DispatchPlannerPage() {
   const [busy, setBusy] = useState(false);
   const [scheduleDriver, setScheduleDriver] = useState("");
   const [scheduleKind, setScheduleKind] = useState("SHIFT");
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     const [orderResponse, driverResponse, scheduleResponse] = await Promise.all([
@@ -40,11 +63,23 @@ export default function DispatchPlannerPage() {
     const driverData = await driverResponse.json(); setDrivers(driverData);
     setSchedules(await scheduleResponse.json());
   }, []);
-  useEffect(() => { void refresh().catch(e => setMessage(e.message)); }, [refresh]);
+  useEffect(() => { void refresh().catch(e => setMessage(e.message)).finally(() => setLoading(false)); }, [refresh]);
   const selectedOrders = useMemo(() => orders.filter(o => quantities[o.id] && Number(quantities[o.id]) > 0), [orders, quantities]);
+  const chosenOrders = orders.filter(order => quantities[order.id] !== undefined);
+  const visibleOrders = orders.filter(order => quantities[order.id] !== undefined ||
+    [order.order_number, order.customer.name, order.origin, order.destination].join(" ").toLowerCase().includes(search.trim().toLowerCase()));
+  const selectedOption = plan?.options.find(option => option.option_id === selected);
+  const validWindow = Boolean(start && end && new Date(end) > new Date(start));
+
+  function changeInputs() {
+    setPlan(null);
+    setSelected("");
+  }
 
   async function optimize(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setMessage(""); setPlan(null); setSelected("");
+    event.preventDefault();
+    if (busy || !validWindow || !selectedOrders.length || selectedOrders.length !== chosenOrders.length) return;
+    setBusy(true); setMessage(""); changeInputs();
     try {
       const response = await apiFetch("/fleet/dispatch-plans/optimize", { method: "POST", body: JSON.stringify({
         allocations: selectedOrders.map(o => ({ order_id: o.id, quantity: quantities[o.id] })),
@@ -58,10 +93,15 @@ export default function DispatchPlannerPage() {
   }
 
   async function confirm() {
-    if (!plan || !selected) return;
+    if (busy || !plan || !selected || !tripNumber.trim()) return;
+    if (Date.parse(plan.expires_at) <= Date.now()) {
+      setMessage("This proposal expired. Generate new options before assigning a trip.");
+      changeInputs();
+      return;
+    }
     setBusy(true); setMessage("");
     try {
-      const response = await apiFetch(`/fleet/dispatch-plans/${plan.plan_id}/confirm`, { method: "POST", body: JSON.stringify({ option_id: selected, fingerprint: plan.fingerprint, trip_number: tripNumber }) });
+      const response = await apiFetch(`/fleet/dispatch-plans/${plan.plan_id}/confirm`, { method: "POST", body: JSON.stringify({ option_id: selected, fingerprint: plan.fingerprint, trip_number: tripNumber.trim() }) });
       const data = await response.json(); if (!response.ok) throw new Error(data.error || "Could not confirm this plan.");
       const trips = data.trips || [data.trip];
       const unserved = data.unserved_orders?.length ? ` ${data.unserved_orders.length} shipment(s) remain unassigned; review the open dispatch queue.` : "";
@@ -71,38 +111,129 @@ export default function DispatchPlannerPage() {
   }
 
   async function addSchedule(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setMessage(""); const values = Object.fromEntries(new FormData(event.currentTarget).entries());
+    event.preventDefault(); const form = event.currentTarget; setBusy(true); setMessage(""); const values = Object.fromEntries(new FormData(form).entries());
     try {
       const response = await apiFetch("/fleet/driver-schedules", { method: "POST", body: JSON.stringify({ ...values, driver_id: scheduleDriver, kind: scheduleKind, starts_at: new Date(String(values.starts_at)).toISOString(), ends_at: new Date(String(values.ends_at)).toISOString() }) });
       const data = await response.json(); if (!response.ok) throw new Error(data.error || "Could not save driver availability.");
-      setMessage("Driver availability saved."); event.currentTarget.reset(); await refresh();
+      setMessage("Driver availability saved."); form.reset(); changeInputs(); await refresh();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Could not save driver availability."); }
     finally { setBusy(false); }
   }
 
   async function removeSchedule(id: string) {
-    setBusy(true); try { const response = await apiFetch(`/fleet/driver-schedules/${id}`, { method: "DELETE" }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Could not remove schedule."); await refresh(); }
+    setBusy(true); try { const response = await apiFetch(`/fleet/driver-schedules/${id}`, { method: "DELETE" }); if (!response.ok) { const data = await response.json(); throw new Error(data.error || "Could not remove schedule."); } changeInputs(); await refresh(); }
     catch (error) { setMessage(error instanceof Error ? error.message : "Could not remove schedule."); } finally { setBusy(false); }
   }
 
-  return <UiMain className="mx-auto max-w-7xl space-y-7 px-5 py-8">
-    <header className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[.16em] text-forest">Transport operations · Dispatch</p><UiH1 className="mt-2">Dispatch planner</UiH1><UiText className="mt-2 max-w-3xl">Build multi-stop manifests, compare single-truck and fleet-level options, then confirm proposed trips after reviewing routes and constraints.</UiText></div><a className="text-sm font-semibold text-forest underline" href="/fleet/dispatch">Back to dispatch board</a></header>
-    {message && <UiAlert>{message}</UiAlert>}
-    <UiSection className="space-y-5 rounded-2xl border border-line bg-white p-5 shadow-sm"><div><UiH2>1. Choose shipments and dispatch window</UiH2><UiText className="mt-1">Partially assigned orders show their remaining eligible quantity when recalculated by the server.</UiText></div>
-      {!orders.length ? <p className="rounded-xl bg-canvas p-5 text-sm text-muted">No open or partially assigned shipments need planning.</p> : <form onSubmit={optimize} className="space-y-5">
-        <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead><tr className="border-b border-line text-xs uppercase text-muted"><th className="py-3">Shipment</th><th>Customer and lane</th><th>Remaining load</th><th>Plan quantity</th></tr></thead><tbody>{orders.map(order => <tr key={order.id} className="border-b border-line/70"><td className="py-3 font-semibold">{order.order_number}<div className="text-xs font-normal text-muted">{order.status.replaceAll("_", " ")}</div></td><td>{order.customer.name}<div className="text-xs text-muted">{order.origin} → {order.destination}</div></td><td>{order.load_quantity || "—"} {order.load_unit}</td><td><input aria-label={`Quantity for ${order.order_number}`} className={`${field} max-w-36`} type="number" min="0" step="0.001" value={quantities[order.id] || ""} placeholder="Skip" onChange={e => setQuantities(v => ({ ...v, [order.id]: e.target.value }))} /></td></tr>)}</tbody></table></div>
-        <div className="grid gap-4 md:grid-cols-2"><label className="text-sm font-medium">Window starts<input required type="datetime-local" className={`${field} mt-1`} value={start} onChange={e => setStart(e.target.value)} /></label><label className="text-sm font-medium">Window ends<input required type="datetime-local" className={`${field} mt-1`} value={end} onChange={e => setEnd(e.target.value)} /></label></div>
-        <UiButton type="submit" disabled={busy || !selectedOrders.length}>{busy ? "Planning…" : `Generate options for ${selectedOrders.length} shipment(s)`}</UiButton>
-      </form>}
+  return <UiMain className="mx-auto w-full max-w-7xl space-y-5 px-4 py-7 sm:px-6">
+    <header className="flex flex-wrap items-end justify-between gap-4">
+      <div><p className="text-xs font-semibold uppercase tracking-wider text-forest">Fleet · Dispatch</p>
+        <UiH1 className="mt-1 text-2xl font-bold">Multi-stop trip planner</UiH1>
+        <UiText className="mt-1 text-sm text-slate-600">Choose shipments, review the suggested stops, and assign a truck and driver.</UiText>
+      </div>
+      <a className="text-sm font-semibold text-forest underline" href="/fleet/dispatch">Back to dispatch</a>
+    </header>
+    {message && <UiAlert role="status">{message}</UiAlert>}
+
+    <UiSection className="rounded-xl border border-line bg-white p-4 sm:p-5">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+        <div><UiH2 className="text-lg font-bold">1. Choose shipments</UiH2><UiText className="mt-1 text-sm text-slate-600">Select the orders to include and enter how much to carry.</UiText></div>
+        <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-forest">{chosenOrders.length} selected</span>
+      </div>
+      {loading ? <UiText>Loading shipments…</UiText> : !orders.length ? <UiText className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">No open or partly assigned shipments need planning.</UiText> :
+        <form onSubmit={optimize}>
+          <fieldset disabled={busy} className="min-w-0 space-y-4">
+            <label className="block max-w-sm text-sm font-semibold">Find an order
+              <input className={`${field} mt-1`} value={search} onChange={event => setSearch(event.target.value)} placeholder="Order, customer, or location"/>
+            </label>
+            <div className="max-h-80 divide-y divide-line overflow-y-auto rounded-xl border border-line">
+              {visibleOrders.map(order => {
+                const checked = quantities[order.id] !== undefined;
+                return <div key={order.id} className={`grid gap-2 p-3 sm:grid-cols-[minmax(0,1fr)_10rem] ${checked ? "bg-emerald-50/50" : ""}`}>
+                  <label className="flex min-w-0 cursor-pointer items-start gap-3">
+                    <input type="checkbox" className="mt-1 size-4 shrink-0 accent-emerald-700" checked={checked} onChange={event => {
+                      const include = event.target.checked;
+                      changeInputs();
+                      setQuantities(current => {
+                        const next = { ...current };
+                        if (include) next[order.id] = order.status === "OPEN" ? order.load_quantity || "" : "";
+                        else delete next[order.id];
+                        return next;
+                      });
+                    }}/>
+                    <span className="min-w-0 break-words">
+                      <span className="block text-sm font-semibold">{order.order_number} · {order.customer.name}</span>
+                      <span className="block text-sm text-slate-600">{order.origin} → {order.destination}</span>
+                      <span className="text-xs text-slate-500">{order.status === "PARTIALLY_ASSIGNED" ? "Partly assigned · " : ""}{order.load_quantity ? `Order load ${order.load_quantity} ${order.load_unit}` : "Load size not recorded"}</span>
+                    </span>
+                  </label>
+                  {checked && <label className="ml-7 text-xs font-medium sm:ml-0">Quantity to carry {order.load_unit && `(${order.load_unit})`}
+                    <input className={`${field} mt-1`} aria-label={`Quantity for ${order.order_number}`} required type="number" min="0.001" step="0.001" value={quantities[order.id]}
+                      onChange={event => { changeInputs(); setQuantities(current => ({ ...current, [order.id]: event.target.value })); }}/>
+                  </label>}
+                </div>;
+              })}
+              {!visibleOrders.length && <p className="p-4 text-sm text-slate-600">No orders match this search.</p>}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-sm font-semibold">Dispatch window starts<input required type="datetime-local" className={`${field} mt-1`} value={start} onChange={event => { changeInputs(); setStart(event.target.value); }}/></label>
+              <label className="text-sm font-semibold">Dispatch window ends<input required type="datetime-local" className={`${field} mt-1`} value={end} onChange={event => { changeInputs(); setEnd(event.target.value); }}/></label>
+            </div>
+            {start && end && !validWindow && <p className="text-sm text-rose-700">The end time must be after the start time.</p>}
+            <UiButton type="submit" disabled={busy || !validWindow || !selectedOrders.length || selectedOrders.length !== chosenOrders.length} className="rounded-lg bg-forest px-4 py-2 text-sm font-semibold text-white">
+              {busy && !plan ? "Finding options…" : "Find routes and available trucks"} <ArrowRight size={16} className="ml-2"/>
+            </UiButton>
+          </fieldset>
+        </form>}
     </UiSection>
-    {plan && <UiSection className="space-y-5 rounded-2xl border border-line bg-white p-5 shadow-sm"><div><UiH2>2. Review and confirm</UiH2><UiText className="mt-1">Proposal expires {new Date(plan.expires_at).toLocaleString()}. Selecting an option does not dispatch it; confirmation checks availability and capacity again.</UiText></div>
-      <div className="grid gap-3 lg:grid-cols-2">{plan.options.map(option => <label key={option.option_id} className={`cursor-pointer rounded-xl border p-4 ${selected === option.option_id ? "border-forest bg-forest/5 ring-1 ring-forest" : "border-line"}`}><div className="flex items-start gap-3"><input type="radio" name="option" checked={selected === option.option_id} onChange={() => setSelected(option.option_id)} /><div className="min-w-0 flex-1"><div className="flex flex-wrap justify-between gap-2"><strong>{option.assignments?.length ? `${option.assignments.length} vehicle/driver assignments` : option.vehicle}</strong><div className="flex flex-wrap gap-2">{option.optimization_status && <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs text-emerald-800">{option.optimization_status === "OPTIMAL_WITHIN_MODEL" ? "Best fleet fit" : "Best found · bounded search"}</span>}<span className="rounded-full bg-canvas px-2 py-1 text-xs">Score {option.score}/100</span></div></div>{option.assignments?.length ? option.assignments.map((assignment, assignmentIndex) => <div key={assignment.vehicle_id} className="mt-3 rounded-lg border border-line bg-white p-3"><p className="text-sm font-semibold">Trip {assignmentIndex + 1} · {assignment.vehicle}</p><p className="text-sm">{assignment.driver}</p><p className="mt-1 text-xs text-muted">{assignment.order_ids.length} shipment(s) · {assignment.route.provider_status === "UPDATED" ? `${assignment.route.distance_km} km Google road estimate` : assignment.route.distance_km == null ? "Distance unavailable" : `${assignment.route.distance_km} km straight-line estimate`}{assignment.route.estimated_travel_minutes != null ? ` · ${assignment.route.estimated_travel_minutes} min` : ""}</p><ol className="mt-2 space-y-1 border-l border-line pl-3">{assignment.route.stops.map((stop, i) => <li key={`${stop.order_id}-${stop.kind}`} className="text-xs"><span className="text-muted">{String(i + 1).padStart(2, "0")} · {stop.kind}</span> · {stop.order_number} · {stop.address}{stop.planned_at && <div className="text-muted">{new Date(stop.planned_at).toLocaleString()}</div>}</li>)}</ol></div>) : <><p className="mt-1 text-sm">{option.driver}</p><p className="mt-2 text-xs text-muted">{option.route.provider_status === "UPDATED" ? `${option.route.distance_km} km Google road estimate` : `${option.route.distance_km ?? "—"} km straight-line estimate`}{option.route.estimated_travel_minutes != null ? ` · ${option.route.estimated_travel_minutes} min` : ""}</p><ol className="mt-3 space-y-2 border-l border-line pl-4">{option.route.stops.map((stop, i) => <li key={`${stop.order_id}-${stop.kind}`} className="text-sm"><span className="text-xs text-muted">{String(i + 1).padStart(2, "0")} · {stop.kind}</span><div>{stop.order_number} · {stop.address}</div><div className="text-xs text-muted">{stop.planned_at ? new Date(stop.planned_at).toLocaleString() : "Time not estimated"}</div></li>)}</ol></>}{!!option.unserved_orders?.length && <div className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900"><strong>{option.unserved_orders.length} shipment(s) remain unassigned</strong>{option.unserved_orders.map(item => <p key={item.order_id} className="mt-1">{item.order_number}: {item.reasons.join(" ")}</p>)}</div>}<ul className="mt-3 space-y-1 text-xs text-amber-800">{option.warnings.map((warning, i) => <li key={i}>• {warning}</li>)}</ul></div></div></label>)}</div>
-      {!!plan.limitations.length && <div className="rounded-xl bg-canvas p-4 text-xs text-muted"><strong className="text-ink">Estimate limits</strong><ul className="mt-2 list-disc space-y-1 pl-5">{plan.limitations.map((x, i) => <li key={i}>{x}</li>)}</ul></div>}
-      {!!plan.options.length && <div className="flex flex-wrap items-end gap-3"><label className="text-sm font-medium">Trip number<input className={`${field} mt-1`} value={tripNumber} onChange={e => setTripNumber(e.target.value)} placeholder="TRIP-2026-001" maxLength={64} /></label><UiButton disabled={busy || !selected || !tripNumber.trim()} onClick={() => void confirm()}>{busy ? "Confirming…" : "Confirm dispatch"}</UiButton></div>}
-    </UiSection>}
-    <UiSection className="space-y-5 rounded-2xl border border-line bg-white p-5 shadow-sm"><div><UiH2>Driver availability</UiH2><UiText className="mt-1">Add shifts so the planner can distinguish confirmed working windows from unrecorded availability.</UiText></div>
+
+    <UiSection className="rounded-xl border border-line bg-white p-4 sm:p-5">
+      <UiH2 className="text-lg font-bold">2. Review the route</UiH2>
+      {!plan?.options.length ? <UiText className="mt-2 text-sm text-slate-600">{plan ? "No routes are available for this selection. Adjust the shipments or dispatch window." : "Find options above to see the suggested pickup and delivery stops."}</UiText> : <>
+        <div role="group" aria-label="Trip options" className="mt-4 grid gap-2 sm:grid-cols-2">
+          {plan.options.map((option, index) => <label key={option.option_id} className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 ${selected === option.option_id ? "border-forest bg-emerald-50" : "border-line"}`}>
+            <input type="radio" name="option" checked={selected === option.option_id} disabled={busy} onChange={() => setSelected(option.option_id)} className="mt-1 accent-emerald-700"/>
+            <span><span className="block text-sm font-semibold">Option {index + 1} · {option.assignments?.length ? `${option.assignments.length} ${option.assignments.length === 1 ? "trip" : "trips"}` : option.vehicle}</span>
+              <span className="text-xs text-slate-600">{option.assignments?.length ? option.assignments.map(item => item.vehicle).join(", ") : option.driver} · Fit score {option.score}/100</span></span>
+          </label>)}
+        </div>
+        {selectedOption && <div className="mt-4 rounded-xl border border-line p-4">
+          <div className="flex items-center gap-2 text-sm font-semibold"><MapPin size={16} className="text-forest"/> Suggested stop order</div>
+          {selectedOption.assignments?.length ? selectedOption.assignments.map((assignment, index) => <div key={assignment.vehicle_id} className="mt-3 border-t border-line pt-3">
+            <p className="text-sm font-bold">Trip {index + 1} · {assignment.vehicle} · {assignment.driver}</p>
+            <RoutePreview route={assignment.route}/>
+            {!!assignment.warnings.length && <ul className="mt-3 list-disc pl-5 text-xs text-amber-900">{assignment.warnings.map((warning, i) => <li key={i}>{warning}</li>)}</ul>}
+          </div>) : <RoutePreview route={selectedOption.route}/>}
+          {!!selectedOption.unserved_orders?.length && <div className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+            <strong>{selectedOption.unserved_orders.length} shipments would remain unassigned</strong>
+            {selectedOption.unserved_orders.map(item => <p key={item.order_id} className="mt-1 text-xs">{item.order_number} · {item.reasons.join(" ")}</p>)}
+          </div>}
+          {!!selectedOption.warnings.length && <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-amber-900">{selectedOption.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
+        </div>}
+      </>}
+      {!!plan?.limitations.length && <details className="mt-3 text-sm text-slate-600"><summary className="cursor-pointer font-semibold">Planning limits</summary>
+        <ul className="mt-2 list-disc space-y-1 pl-5">{plan.limitations.map((item, index) => <li key={index}>{item}</li>)}</ul>
+      </details>}
+    </UiSection>
+
+    <UiSection className="rounded-xl border border-line bg-white p-4 sm:p-5">
+      <UiH2 className="text-lg font-bold">3. Assign truck and driver</UiH2>
+      {selectedOption && plan ? <>
+        <div className="mt-3 space-y-2">
+          {(selectedOption.assignments?.length ? selectedOption.assignments : [selectedOption]).map(item => <div key={item.vehicle_id} className="flex flex-wrap items-center gap-2 rounded-lg bg-emerald-50 p-3 text-sm">
+            <Truck size={17} className="text-forest"/><strong>Truck {item.vehicle}</strong><span>· Driver {item.driver}</span>
+          </div>)}
+        </div>
+        <UiText className="mt-3 text-sm text-slate-600">Proposal expires {dateTime(plan.expires_at)}. Availability is checked again when you confirm.</UiText>
+        <form className="mt-3 flex flex-wrap items-end gap-3" onSubmit={event => { event.preventDefault(); void confirm(); }}>
+          <label className="text-sm font-semibold">Trip number<input required className={`${field} mt-1`} value={tripNumber} onChange={event => setTripNumber(event.target.value)} placeholder="e.g. TRIP-204" maxLength={64}/></label>
+          <UiButton type="submit" disabled={busy || !tripNumber.trim()} className="rounded-lg bg-forest px-4 py-2 text-sm font-semibold text-white">{busy ? "Confirming…" : "Confirm assignment"}</UiButton>
+        </form>
+      </> : <UiText className="mt-2 text-sm text-slate-600">Choose a route option to see its truck and driver.</UiText>}
+    </UiSection>
+    <details className="space-y-4 rounded-xl border border-line bg-white p-4 sm:p-5"><summary className="cursor-pointer text-sm font-semibold">Manage driver availability</summary><UiText className="text-sm text-slate-600">Record shifts, leave, or unavailable time.</UiText>
       <form onSubmit={addSchedule} className="grid gap-3 md:grid-cols-2 xl:grid-cols-5"><label className="text-sm">Driver<select required className={`${field} mt-1`} value={scheduleDriver} onChange={e => setScheduleDriver(e.target.value)}><option value="">Select driver</option>{drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label><label className="text-sm">Availability<select className={`${field} mt-1`} value={scheduleKind} onChange={e => setScheduleKind(e.target.value)}><option value="SHIFT">Available shift</option><option value="LEAVE">Leave</option><option value="UNAVAILABLE">Unavailable</option></select></label><label className="text-sm">Starts<input required name="starts_at" type="datetime-local" className={`${field} mt-1`} /></label><label className="text-sm">Ends<input required name="ends_at" type="datetime-local" className={`${field} mt-1`} /></label><label className="text-sm">Note<input name="note" maxLength={240} className={`${field} mt-1`} placeholder="Optional" /></label><div><UiButton type="submit" disabled={busy || !scheduleDriver}>Save availability</UiButton></div></form>
       <div className="divide-y divide-line">{schedules.length ? schedules.map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm"><div><strong>{item.driver}</strong><span className="ml-2 rounded-full bg-canvas px-2 py-1 text-xs">{item.kind}</span><div className="mt-1 text-xs text-muted">{new Date(item.starts_at).toLocaleString()} – {new Date(item.ends_at).toLocaleString()} {item.note && `· ${item.note}`}</div></div><button className="text-sm font-semibold text-red-700" disabled={busy} onClick={() => void removeSchedule(item.id)}>Remove</button></div>) : <p className="py-3 text-sm text-muted">No driver schedules recorded yet.</p>}</div>
-    </UiSection>
+    </details>
   </UiMain>;
 }

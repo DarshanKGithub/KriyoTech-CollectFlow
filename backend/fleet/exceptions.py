@@ -7,6 +7,7 @@ from datetime import timedelta
 from uuid import UUID
 
 from django.db import transaction
+from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -89,7 +90,8 @@ class FleetExceptions(APIView):
     def get(self, request):
         if not self.allowed(request):
             return Response({"error": "Fleet review access required."}, status=403)
-        rows = FleetExceptionCase.objects.filter(tenant=request.tenant).select_related("owner", "reviewed_by").order_by("status", "due_at", "-created_at")
+        workspace_cases = FleetExceptionCase.objects.filter(tenant=request.tenant)
+        rows = workspace_cases.select_related("owner", "reviewed_by").order_by("status", "due_at", "-created_at", "id")
         if request.query_params.get("status"):
             rows = rows.filter(status=request.query_params["status"])
         if request.query_params.get("export") == "csv":
@@ -104,11 +106,31 @@ class FleetExceptions(APIView):
             response = HttpResponse(output.getvalue(), content_type="text/csv")
             response["Content-Disposition"] = 'attachment; filename="fleet-exceptions.csv"'
             return response
+        active = Q(status__in=["OPEN", "CONFIRMED"])
+        overdue = active & Q(due_at__lt=timezone.now())
+        unassigned = active & Q(owner__isnull=True)
+        queues = {
+            "active": active,
+            "overdue": overdue,
+            "unassigned": unassigned,
+            "closed": Q(status__in=["DISMISSED", "RESOLVED"]),
+        }
+        queue = request.query_params.get("queue")
+        if queue in queues:
+            rows = rows.filter(queues[queue])
+        for term in request.query_params.get("search", "")[:200].split():
+            rows = rows.filter(
+                Q(category__icontains=term) | Q(status__icontains=term) | Q(owner__email__icontains=term)
+                | Q(evidence__message__icontains=term) | Q(evidence__trip_number__icontains=term)
+                | Q(evidence__order_number__icontains=term) | Q(evidence__vehicle__icontains=term)
+                | Q(evidence__registration_number__icontains=term)
+            )
         try:
             page=max(1,int(request.query_params.get("page",1)));page_size=min(100,max(1,int(request.query_params.get("page_size",50))))
         except (ValueError,TypeError):return Response({"error":"Enter a valid page and page size."},status=400)
         members = Membership.objects.filter(tenant=request.tenant, is_active=True,role__in=["OWNER","FINANCE","FLEET","APPROVER"]).select_related("user")
         return Response({"count": rows.count(),"page":page,"page_size":page_size, "items": [case_data(row) for row in rows[(page-1)*page_size:page*page_size]],
+            "summary": workspace_cases.aggregate(**{key: Count("id", filter=condition) for key, condition in queues.items()}),
             "owners": [{"id": str(member.user_id), "email": member.user.email} for member in members]})
 
     def post(self, request):

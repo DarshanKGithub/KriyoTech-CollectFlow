@@ -341,6 +341,64 @@ def test_purchase_order_csv_import_creates_revision_history(finance_client):
 
 
 @pytest.mark.django_db
+def test_purchase_order_import_preview_rolls_back_and_reimport_is_idempotent(finance_client):
+    from procurement.models import PurchaseOrderRevision
+    tenant, user, client = finance_client
+    vendor = Vendor.objects.create(tenant=tenant, name="Preview supplier", external_code="PREVIEW-1")
+    content = b"po_number,vendor_code,order_date,line_no,item_code,description,quantity,uom,rate,gst_rate\nPO-PREVIEW,PREVIEW-1,2026-10-18,1,ITEM-1,Preview part,4,EA,12.50,18\n"
+    preview = client.post(
+        "/api/v1/purchase-orders/import",
+        {"file": SimpleUploadedFile("preview.csv", content, content_type="text/csv"), "preview": "true"},
+        format="multipart",
+        HTTP_X_WORKSPACE=tenant.workspace_key,
+    )
+    assert preview.status_code == 200 and preview.data["accepted_rows"] == 1
+    assert preview.data["preview"] is True
+    assert not PurchaseOrder.objects.filter(tenant=tenant, number="PO-PREVIEW").exists()
+    assert not PurchaseOrderRevision.objects.filter(tenant=tenant).exists()
+
+    committed = client.post(
+        "/api/v1/purchase-orders/import",
+        {"file": SimpleUploadedFile("preview.csv", content, content_type="text/csv")},
+        format="multipart",
+        HTTP_X_WORKSPACE=tenant.workspace_key,
+    )
+    assert committed.status_code == 200 and committed.data["accepted_rows"] == 1
+    po = PurchaseOrder.objects.get(tenant=tenant, number="PO-PREVIEW")
+    initial_revision = po.revision
+    revision_count = PurchaseOrderRevision.objects.filter(purchase_order=po).count()
+
+    retried = client.post(
+        "/api/v1/purchase-orders/import",
+        {"file": SimpleUploadedFile("preview.csv", content, content_type="text/csv")},
+        format="multipart",
+        HTTP_X_WORKSPACE=tenant.workspace_key,
+    )
+    po.refresh_from_db()
+    assert retried.status_code == 200 and retried.data["accepted_rows"] == 1
+    assert po.revision == initial_revision
+    assert PurchaseOrderRevision.objects.filter(purchase_order=po).count() == revision_count
+
+
+@pytest.mark.django_db
+def test_import_preview_returns_row_data_and_error_for_correction_file(finance_client):
+    tenant, _, client = finance_client
+    content = b"po_number,vendor_code,order_date,line_no,item_code,description,quantity,uom,rate,gst_rate\nPO-MISSING,MISSING,2026-10-18,1,ITEM-1,No vendor,4,EA,12.50,18\n"
+    response = client.post(
+        "/api/v1/purchase-orders/import",
+        {"file": SimpleUploadedFile("bad.csv", content, content_type="text/csv"), "preview": "true"},
+        format="multipart",
+        HTTP_X_WORKSPACE=tenant.workspace_key,
+    )
+    assert response.status_code == 207
+    assert response.data["accepted_rows"] == 0 and response.data["rejected_rows"] == 1
+    assert response.data["correction_rows"][0]["po_number"] == "PO-MISSING"
+    assert "import_error" in response.data["correction_rows"][0]
+    assert response.data["correction_rows"][0]["source_row"] == 2
+    assert not PurchaseOrder.objects.filter(tenant=tenant).exists()
+
+
+@pytest.mark.django_db
 def test_grn_csv_import_cannot_exceed_cumulative_po_line_balance(finance_client):
     tenant, _, client = finance_client
     vendor = Vendor.objects.create(tenant=tenant, name="Imported receipt supplier", approved=True)
@@ -354,6 +412,47 @@ def test_grn_csv_import_cannot_exceed_cumulative_po_line_balance(finance_client)
     assert rejected.status_code == 207 and rejected.data["accepted_rows"] == 0
     assert "remaining receivable quantity of 2" in rejected.data["errors"][0]["message"]
     assert GRNLine.objects.filter(tenant=tenant, purchase_order_line=line).count() == 1
+
+
+@pytest.mark.django_db
+def test_grn_import_preview_does_not_save_and_retry_updates_same_receipt(finance_client):
+    tenant, _, client = finance_client
+    vendor = Vendor.objects.create(tenant=tenant, name="Preview receipt supplier", approved=True)
+    po = PurchaseOrder.objects.create(
+        tenant=tenant,
+        vendor=vendor,
+        number="PO-GRN-PREVIEW",
+        status=PurchaseOrder.Status.APPROVED,
+    )
+    line = PurchaseOrderLine.objects.create(
+        tenant=tenant, purchase_order=po, line_no=1, description="Receipt part", quantity="10", rate="2"
+    )
+    content = b"po_number,grn_number,po_line_no,quantity_received\nPO-GRN-PREVIEW,GRN-PREVIEW,1,8\n"
+    preview = client.post(
+        "/api/v1/grns/import",
+        {"file": SimpleUploadedFile("preview.csv", content, content_type="text/csv"), "preview": "true"},
+        format="multipart",
+        HTTP_X_WORKSPACE=tenant.workspace_key,
+    )
+    assert preview.status_code == 200 and preview.data["accepted_rows"] == 1
+    assert not GRN.objects.filter(tenant=tenant).exists()
+    assert not GRNLine.objects.filter(tenant=tenant).exists()
+
+    first = client.post(
+        "/api/v1/grns/import",
+        {"file": SimpleUploadedFile("preview.csv", content, content_type="text/csv")},
+        format="multipart",
+        HTTP_X_WORKSPACE=tenant.workspace_key,
+    )
+    retry = client.post(
+        "/api/v1/grns/import",
+        {"file": SimpleUploadedFile("preview.csv", content, content_type="text/csv")},
+        format="multipart",
+        HTTP_X_WORKSPACE=tenant.workspace_key,
+    )
+    assert first.status_code == 200 and retry.status_code == 200
+    assert GRN.objects.filter(tenant=tenant).count() == 1
+    assert GRNLine.objects.get(tenant=tenant, purchase_order_line=line).quantity_received == Decimal("8")
 
 
 @pytest.mark.django_db

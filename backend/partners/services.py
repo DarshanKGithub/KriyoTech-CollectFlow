@@ -8,4 +8,4 @@ def frontend_link(path, params=None):
 
 
 def branding():
-    return {"slug":"", "name":"KriyoTech Labs", "product_name":"KriyoPay", "primary_color":"#16734A", "support_email":"", "is_platform":True}
+    return {"slug":"", "name":"KriyoTech Labs", "product_name":"KriyoPay", "primary_color":"#16734A", "support_email":settings.PLATFORM_SUPPORT_EMAIL, "is_platform":True}

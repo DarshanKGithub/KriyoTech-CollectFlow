@@ -55,6 +55,7 @@ CELERY_BEAT_SCHEDULE = {
     "gmail-invoice-intake-poll": {"task": "phase3.tasks.sync_gmail_mailboxes", "schedule": 300.0},
     "daily-operations-digest": {"task": "phase3.tasks.send_daily_operations_digest", "schedule": crontab(hour=8, minute=0)},
     "billing-webhook-recovery": {"task": "admin_console.tasks.maintain_billing_webhooks", "schedule": 60.0},
+    "invitation-delivery-recovery": {"task": "admin_console.tasks.maintain_invitation_deliveries", "schedule": 60.0},
     "erp-stalled-job-maintenance": {"task": "erp.tasks.recover_stalled_jobs", "schedule": 60.0},
     "erp-scheduled-imports": {"task": "erp.tasks.schedule_imports", "schedule": 60.0},
     "extraction-queue-maintenance": {
@@ -116,7 +117,18 @@ EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "0") == "1"
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "20"))
-DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@kriyopay.local")
+PLATFORM_SUPPORT_EMAIL = "info@kriyotechlabs.com"
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", PLATFORM_SUPPORT_EMAIL)
+ZOHO_SMTP_HOST = os.getenv("ZOHO_SMTP_HOST", "").strip()
+ZOHO_SMTP_APP_PASSWORD = os.getenv("ZOHO_SMTP_APP_PASSWORD", "").strip()
+if ZOHO_SMTP_HOST and ZOHO_SMTP_APP_PASSWORD:
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_HOST = ZOHO_SMTP_HOST
+    EMAIL_PORT = 587
+    EMAIL_USE_TLS = True
+    EMAIL_USE_SSL = False
+    EMAIL_HOST_USER = DEFAULT_FROM_EMAIL = PLATFORM_SUPPORT_EMAIL
+    EMAIL_HOST_PASSWORD = ZOHO_SMTP_APP_PASSWORD
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 DOCUMENT_STORAGE = os.getenv("DOCUMENT_STORAGE", "local")
 EXTRACTION_PROVIDER = os.getenv("EXTRACTION_PROVIDER", "manual")
@@ -137,4 +149,3 @@ RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
 RAZORPAY_API_BASE_URL = os.getenv("RAZORPAY_API_BASE_URL", "https://api.razorpay.com/v1")
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {"vendor_portal": "60/hour", "gmail_oauth_callback": "60/hour", "google_signin_start": "60/hour", "google_signin_callback": "60/hour", "admin_login": "10/hour", "password_reset": "5/hour"}
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["admin_mfa"] = "30/hour"
-

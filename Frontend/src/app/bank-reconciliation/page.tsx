@@ -11,8 +11,6 @@ import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Alert from "@mui/material/Alert";
 import Chip from "@mui/material/Chip";
-import Tabs from "@mui/material/Tabs";
-import Tab from "@mui/material/Tab";
 import TablePagination from "@mui/material/TablePagination";
 import { ReconciliationGroups } from "@/components/reconciliation-groups";
 import { ReconciliationHistory } from "@/components/reconciliation-history";
@@ -31,10 +29,10 @@ import Radio from "@mui/material/Radio";
 import LinearProgress from "@mui/material/LinearProgress";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { DataGrid, type GridColDef } from "@mui/x-data-grid";
-import { Upload, RefreshCw, X, ChevronDown, ArrowDownLeft, ArrowUpRight, FileSpreadsheet, Link2, CheckCircle2, ArrowRight, FlaskConical } from "lucide-react";
+import { Upload, RefreshCw, X, ChevronDown, ArrowDownLeft, ArrowUpRight, FileSpreadsheet, Link2, CheckCircle2, CircleAlert, FlaskConical } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { apiError, financialErrorMessage, absoluteAmount, compareCandidate, financialDate, moneyDirection, type BankRow, type MatchCandidate } from "@/lib/finance";
-import { FinancialHeader, FinancialMetric, Money, FinancialStatus, DetailGroup, CopyReference } from "@/components/financial-ui";
+import { FinancialHeader, Money, FinancialStatus, DetailGroup, CopyReference } from "@/components/financial-ui";
 import { ContentSkeleton } from "@/components/content-skeleton";
 import { EmptyState } from "@/components/empty-state";
 import { UiForm } from "@/components/product-ui";
@@ -44,14 +42,31 @@ import { showNotice } from "@/components/product-dialogs";
 
 type Action = { action:"match"|"reconcile"|"unmatch"; candidate?:MatchCandidate; manual?:{target_type:MatchCandidate["target_type"];target_id:string} };
 const targetLabels={VENDOR_PAYMENT:"Vendor payment",CUSTOMER_COLLECTION:"Customer collection",DRIVER_SALARY_PAYMENT:"Driver salary payment"};
-const tabLabels={ALL:"All rows",UNMATCHED:"Needs matching",MATCHED:"Awaiting confirmation",DUPLICATE:"Duplicates",RECONCILED:"Reconciled"};
+const statusLabels = {
+  REVIEW: "Needs review", MATCHED: "Matched", RECONCILED: "Reconciled",
+  ALL: "All transactions", UNMATCHED: "Unmatched only", DUPLICATE: "Duplicates only",
+} as const;
+type StatusFilter = keyof typeof statusLabels;
+const queues = [
+  { value: "REVIEW", label: "Needs review", detail: "Unmatched transactions and duplicates", icon: CircleAlert, tone: "warning.main" },
+  { value: "MATCHED", label: "Matched", detail: "Linked, awaiting confirmation", icon: Link2, tone: "info.main" },
+  { value: "RECONCILED", label: "Reconciled", detail: "Matches confirmed", icon: CheckCircle2, tone: "success.main" },
+  { value: "ALL", label: "All transactions", detail: "Every imported bank transaction", icon: FileSpreadsheet, tone: "text.secondary" },
+] as const;
+function reviewAction(row: BankRow, canReview: boolean) {
+  if (row.status === "DUPLICATE") return "Review duplicate";
+  if (!canReview || row.source_verified === false) return "View details";
+  if (row.status === "UNMATCHED") return "Find a match";
+  if (row.status === "MATCHED") return "Review match";
+  return "View details";
+}
 const validId=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export default function BankReconciliationPage() {
   const [rows,setRows]=useState<BankRow[]>([]),[counts,setCounts]=useState<Record<string,number>|null>(null);
   const [loading,setLoading]=useState(true),[refreshing,setRefreshing]=useState(false),[error,setError]=useState("");
   const [canReview,setCanReview]=useState(false),[loadedAt,setLoadedAt]=useState("");
-  const [status,setStatus]=useState("ALL"),[search,setSearch]=useState(""),[direction,setDirection]=useState("ALL");
+  const [status,setStatus]=useState<StatusFilter>("REVIEW"),[search,setSearch]=useState(""),[direction,setDirection]=useState("ALL");
   const [paginationModel,setPaginationModel]=useState({page:0,pageSize:25}),[rowCount,setRowCount]=useState(0);
   const [querySearch,setQuerySearch]=useState("");
   const [reason,setReason]=useState(""),[requestKey,setRequestKey]=useState("");
@@ -100,7 +115,7 @@ export default function BankReconciliationPage() {
     } catch(e){if(request===loadSequence.current.value)setError(financialErrorMessage(e,"Could not load reconciliation records."));}
     finally {if(request===loadSequence.current.value){setLoading(false);setRefreshing(false);}}
   },[paginationModel.page,paginationModel.pageSize,status,direction,querySearch,sortKey,from,to]);
-  useEffect(()=>{const query=new URLSearchParams(window.location.search).get("status");if(query&&query in tabLabels)setStatus(query);},[]);
+  useEffect(()=>{const query=new URLSearchParams(window.location.search).get("status");if(query&&Object.prototype.hasOwnProperty.call(statusLabels,query))setStatus(query as StatusFilter);},[]);
   useEffect(()=>{const tracker=loadSequence.current;void load();const update=()=>setOnline(navigator.onLine);update();window.addEventListener("online",update);window.addEventListener("offline",update);return()=>{tracker.value++;window.removeEventListener("online",update);window.removeEventListener("offline",update);};},[load]);
   const selectedAmount=selected?.amount||"";
   useEffect(()=>{setCandidate(null);setCandidateError("");setManualId("");setManualType(moneyDirection(selectedAmount)==="IN"?"CUSTOMER_COLLECTION":"VENDOR_PAYMENT");},[selectedId,selectedAmount]);
@@ -116,7 +131,12 @@ export default function BankReconciliationPage() {
   },[importOpen]);
   const filtered=rows;
   const total=counts?Object.values(counts).reduce((sum,count)=>sum+count,0):0;
-  const progress=total?Math.floor((counts?.RECONCILED||0)/total*100):0;
+  const reviewCount = (counts?.UNMATCHED ?? 0) + (counts?.DUPLICATE ?? 0);
+  const currentQueue = status === "UNMATCHED" || status === "DUPLICATE" ? "REVIEW" : status;
+  const visibleCounts = { REVIEW: reviewCount, MATCHED: counts?.MATCHED ?? 0, RECONCILED: counts?.RECONCILED ?? 0, ALL: total };
+  useEffect(() => {
+    if (selectedId && !selected && !loading && !refreshing) setSelectedId("");
+  }, [selectedId, selected, loading, refreshing]);
   function rejectCandidate(item:MatchCandidate) {setFeedback(item);setFeedbackReason("");setFeedbackKey(crypto.randomUUID());setCandidateError("");}
   async function submitFeedback() {
     if(!selected||!feedback?.candidate_id||!feedbackReason.trim()||writing.current)return;
@@ -159,35 +179,110 @@ export default function BankReconciliationPage() {
     finally{writing.current=false;setBusy(false);}
   }
   const gridColumns=useMemo<GridColDef<BankRow>[]>(()=>[
-    {field:"date",headerName:"Bank date",width:130,valueFormatter:value=>financialDate(String(value))},
-    {field:"description",headerName:"Description / counterparty",minWidth:230,flex:1.5},
-    {field:"reference",headerName:"Bank reference",minWidth:160,flex:1},
-    {field:"amount",headerName:"Source amount",type:"number",width:170,valueGetter:value=>Number(value),renderCell:({row})=><Money value={row.amount} currency={row.currency||""}/>},
-    {field:"source_type",headerName:"Source",width:125,sortable:false,renderCell:({row})=><Chip size="small" color={row.is_test_data?"warning":"default"} variant={row.is_test_data?"filled":"outlined"} label={row.is_test_data?"TEST DATA":"Bank feed"}/>},
-    {field:"status",headerName:"Reconciliation",minWidth:235,renderCell:({row})=><FinancialStatus status={row.status}/>},
-    {field:"actions",headerName:"Review",width:140,sortable:false,filterable:false,disableExport:true,renderCell:({row})=><Button type="button" size="small" onClick={()=>openRow(row)}>{row.status==="UNMATCHED"&&canReview?"Review & match":"View details"}</Button>},
+    {field:"status",headerName:"Status",width:200,hideable:false,renderCell:({row})=><FinancialStatus status={row.status}/>},
+    {field:"description",headerName:"Bank transaction",minWidth:195,flex:1,
+      renderCell:({row})=><Stack direction="row" spacing={1} sx={{ alignItems: "center", minWidth: 0, width: "100%" }}>
+        {row.is_test_data && <Chip size="small" color="warning" variant="outlined" label="Test data"/>}
+        <Typography variant="body2" noWrap title={row.description}>{row.description}</Typography>
+      </Stack>},
+    {field:"amount",headerName:"Amount",type:"number",width:145,valueGetter:value=>Number(value),renderCell:({row})=><Money value={row.amount} currency={row.currency||""}/>},
+    {field:"date",headerName:"Bank date",width:112,valueFormatter:value=>financialDate(String(value))},
+    {field:"reference",headerName:"Bank reference",minWidth:120,flex:.6},
+    {field:"actions",headerName:"Next step",width:145,sortable:false,filterable:false,disableExport:true,renderCell:({row})=><Button type="button" size="small" onClick={()=>openRow(row)}>{reviewAction(row,canReview)}</Button>},
   ],[canReview]);
   const comparison=selected&&review?.candidate?compareCandidate(selected,review.candidate):null;
   return <Box component="main" sx={{p:{xs:2,md:3},width:"100%",minWidth:0}}>
-    <FinancialHeader eyebrow="Financial operations" title="Reconciliation center" description="Match bank transactions to vendor payments, customer collections and driver payments." action={<Stack direction="row" spacing={1} sx={{flexWrap:"wrap"}}><Button variant="outlined" disabled={refreshing||busy} startIcon={<RefreshCw size={16}/>} onClick={()=>void load()}>Refresh</Button>{canReview&&<><Button variant="outlined" color="warning" disabled={!online||busy} startIcon={<FlaskConical size={16}/>} onClick={()=>void generateTestFeed()}>Generate test bank feed</Button><Button variant="contained" disabled={!online||busy} startIcon={<Upload size={16}/>} onClick={()=>{setImportError("");setFile(null);setImportOpen(true);}}>Import statement</Button></>}</Stack>}/>
+    <FinancialHeader eyebrow="Financial operations" title="Bank reconciliation" description="See which bank transactions need review, which are matched, and which matches are confirmed." action={<Stack direction="row" spacing={1} sx={{flexWrap:"wrap"}}><Button variant="outlined" disabled={refreshing||busy} startIcon={<RefreshCw size={16}/>} onClick={()=>void load()}>Refresh</Button>{canReview&&<><Button variant="outlined" color="warning" disabled={!online||busy} startIcon={<FlaskConical size={16}/>} onClick={()=>void generateTestFeed()}>Generate test bank feed</Button><Button variant="contained" disabled={!online||busy} startIcon={<Upload size={16}/>} onClick={()=>{setImportError("");setFile(null);setImportOpen(true);}}>Import statement</Button></>}</Stack>}/>
     {!online&&<Alert severity="warning" sx={{mb:2}}>You are offline. Previously loaded records remain visible. Matching and import actions are paused.</Alert>}
     {error&&<Alert severity="error" action={<Button color="inherit" disabled={refreshing} onClick={()=>void load()}>Retry</Button>} sx={{mb:2}}>{error} {rows.length>0&&"Previously loaded records may be out of date."}</Alert>}
     {loading?<ContentSkeleton variant="cards" rows={3} label="Loading reconciliation workspace"/>:<>
       {!canReview&&<Alert severity="info" sx={{mb:2}}>Read-only view. Only workspace owners and finance users can import, match or confirm records.</Alert>}
-      <Box sx={{display:"grid",gap:2,gridTemplateColumns:{xs:"1fr",sm:"repeat(3,minmax(0,1fr))"}}}><FinancialMetric icon={<FileSpreadsheet size={18}/>} label="Statement rows" value={counts?total:"—"} detail="All statement rows in this workspace"/><FinancialMetric icon={<Link2 size={18}/>} tone="warning" label="Needs matching" value={counts?.UNMATCHED??"—"} detail={counts?`${counts.MATCHED||0} matched rows await confirmation`:"Counts unavailable"}/><FinancialMetric icon={<CheckCircle2 size={18}/>} tone="success" label="Reconciled" value={counts?.RECONCILED??"—"} detail={counts?`${counts.DUPLICATE||0} duplicate rows need separate review`:"Counts unavailable"}/></Box>
-      <Paper variant="outlined" sx={{p:{xs:2,md:2.5},mt:2,bgcolor:"background.paper",borderColor:"divider",borderRadius:2}}>
-        <Stack direction={{xs:"column",sm:"row"}} sx={{justifyContent:"space-between",gap:2,alignItems:{sm:"center"}}}>
-          <Stack direction="row" spacing={1.5} sx={{alignItems:"center"}}><Box sx={{display:"grid",placeItems:"center",width:40,height:40,flexShrink:0,borderRadius:2,color:"primary.main",bgcolor:"action.hover"}}>{total?<CheckCircle2 size={20}/>:<FileSpreadsheet size={20}/>}</Box><Box><Typography variant="subtitle2">{total?`${progress}% reconciled`:"Start with your bank statement"}</Typography><Typography variant="caption" color="text.secondary">{total?"Match each transaction, then confirm it to reconcile.":"Import a CSV or XLSX file to begin matching transactions."}</Typography></Box></Stack>
-          {total>0?<Typography variant="caption" color="text.secondary">{loadedAt?`Updated ${financialDate(loadedAt,true)}`:"Awaiting refresh"}</Typography>:<Stack direction="row" spacing={1} sx={{alignItems:"center",color:"text.secondary",fontSize:11,flexWrap:"wrap"}}><Chip size="small" variant="outlined" label="1 · Import"/><ArrowRight size={12}/><Chip size="small" variant="outlined" label="2 · Match"/><ArrowRight size={12}/><Chip size="small" variant="outlined" label="3 · Confirm"/></Stack>}
-        </Stack>
-        {total>0&&<LinearProgress aria-label="Imported rows reconciled" variant="determinate" value={progress} sx={{mt:2,height:5,borderRadius:3,bgcolor:"action.selected"}}/>}
-        <Typography variant="caption" color="text.secondary" sx={{display:"block",mt:2,pt:1.5,borderTop:"1px solid",borderColor:"divider",lineHeight:1.6}}>Bank statement reconciliation · Matching and confirmation are separate steps. Gateway settlement data is managed separately.</Typography>
-      </Paper>
-      <Paper variant="outlined" sx={{mt:3,overflow:"hidden"}}><Tabs value={status} onChange={(_,value:string)=>setStatus(value)} variant="scrollable" scrollButtons="auto" aria-label="Reconciliation status filters">{Object.entries(tabLabels).map(([key,label])=><Tab key={key} value={key} label={`${label}${counts?` (${key==="ALL"?total:counts[key]||0})`:""}`}/>)}</Tabs>
-        <Stack direction={{xs:"column",md:"row"}} spacing={1.5} sx={{p:2}}><TextField label="Search imported rows" placeholder="Description, reference or statement" value={search} slotProps={{htmlInput:{maxLength:120}}} onChange={event=>setSearch(event.target.value)} sx={{flex:1,minWidth:180}}/><TextField select label="Direction" value={direction} onChange={event=>setDirection(event.target.value)} slotProps={{select:{native:true}}} sx={{minWidth:155}}><option value="ALL">All directions</option><option value="IN">Money in</option><option value="OUT">Money out</option></TextField><TextField label="From date" type="date" value={from} onChange={event=>setFrom(event.target.value)} slotProps={{inputLabel:{shrink:true}}}/><TextField label="To date" type="date" value={to} error={dateError} helperText={dateError?"End date must follow start date.":undefined} onChange={event=>setTo(event.target.value)} slotProps={{inputLabel:{shrink:true}}}/>{(status!=="ALL"||search||from||to||direction!=="ALL")&&<Button onClick={()=>{setStatus("ALL");setSearch("");setFrom("");setTo("");setDirection("ALL");}}>Clear filters</Button>}</Stack>
-        <Typography variant="caption" color="text.secondary" sx={{display:"block",px:2,pb:2}}>Showing {rows.length} of {rowCount} filtered records across all statements. Summary counts above cover the workspace.</Typography>
-        {refreshing&&<LinearProgress aria-label="Refreshing bank records"/>}
-        {(Boolean(error)&&!rows.length||!rows.length&&total===0)?<EmptyState kind={error?"error":"empty"} title={error?"Reconciliation records unavailable":"No statements imported"} description={error||"Import a CSV or XLSX bank statement to begin reviewing transactions."} actionLabel={error?"Retry":canReview?"Import statement":undefined} onAction={error?()=>void load():canReview?()=>{setFile(null);setImportError("");setImportOpen(true);}:undefined}/>:!filtered.length||dateError?<EmptyState kind="search" description={dateError?"Correct the date range to view matching rows.":"Change the search or filters to find imported transactions."}/>:mobile?<Box sx={{px:2}}>{filtered.map(row=><Box key={row.id} sx={{py:2,borderTop:"1px solid",borderColor:"divider"}}><Stack direction="row" spacing={2} sx={{justifyContent:"space-between"}}><Typography variant="body2" sx={{fontWeight:600}}>{row.description}</Typography><Money value={row.amount} currency={row.currency||""}/></Stack><Typography variant="caption" color="text.secondary">{financialDate(row.date)} · {moneyDirection(row.amount)==="IN"?"Money in":"Money out"}</Typography><Box sx={{my:1}}><FinancialStatus status={row.status}/></Box><Button onClick={()=>openRow(row)}>Review transaction</Button></Box>)}<TablePagination component="div" count={rowCount} page={paginationModel.page} rowsPerPage={paginationModel.pageSize} rowsPerPageOptions={[10,25,50,100]} onPageChange={(_,page)=>setPaginationModel(current=>({...current,page}))} onRowsPerPageChange={event=>setPaginationModel({page:0,pageSize:Number(event.target.value)})}/></Box>:<Box sx={{height:580,display:"flex",flexDirection:"column"}}><GridDensityControl value={preferences.density} onChange={preferences.onDensityChange}/><DataGrid {...preferences} showToolbar slotProps={{toolbar:{showQuickFilter:false,csvOptions:{disableToolbarButton:true},printOptions:{disableToolbarButton:true}}}} rows={filtered} columns={gridColumns} rowCount={rowCount} paginationMode="server" sortingMode="server" disableColumnFilter paginationModel={paginationModel} onPaginationModelChange={setPaginationModel} disableRowSelectionOnClick pageSizeOptions={[10,25,50,100]} sx={{border:0,minHeight:0,flex:1,fontSize:13}}/></Box>}
+      <Box role="group" aria-label="Bank transaction queues" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {queues.map(({ value, label, detail, icon: Icon, tone }) => (
+          <Button key={value} variant="outlined" aria-pressed={currentQueue === value} onClick={() => setStatus(value)}
+            sx={{
+              p: 1.75, textAlign: "left", justifyContent: "flex-start", gap: 1.25,
+              bgcolor: currentQueue === value ? "action.selected" : "background.paper",
+              borderColor: currentQueue === value ? "primary.main" : "divider",
+            }}>
+            <Box component="span" sx={{ display: "grid", placeItems: "center", width: 34, height: 34, flexShrink: 0, borderRadius: 2, bgcolor: "action.hover", color: tone }}>
+              <Icon size={18} aria-hidden="true"/>
+            </Box>
+            <Box component="span" sx={{ flex: 1, minWidth: 0 }}>
+              <Typography component="span" variant="subtitle2" sx={{ display: "block" }}>{label}</Typography>
+              <Typography component="span" variant="caption" color="text.secondary" sx={{ display: "block" }}>{detail}</Typography>
+            </Box>
+            <Typography component="span" variant="h6" sx={{ fontVariantNumeric: "tabular-nums", fontWeight: 750 }}>{counts ? visibleCounts[value] : "—"}</Typography>
+          </Button>
+        ))}
+      </Box>
+
+      <Paper component="section" variant="outlined" sx={{ mt: 2.5, overflow: "hidden", borderRadius: 3 }}>
+        <Box sx={{ p: 2, borderBottom: 1, borderColor: "divider" }}>
+          <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ justifyContent: "space-between" }}>
+            <Box>
+              <Typography component="h2" variant="h6">{statusLabels[status]}</Typography>
+              <Typography variant="body2" color="text.secondary" aria-live="polite">
+                {refreshing ? "Loading transactions…" : `${rowCount} matching ${rowCount === 1 ? "transaction" : "transactions"}`}
+              </Typography>
+            </Box>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+              <TextField size="small" label="Search transactions" placeholder="Description, reference, or statement" value={search}
+                slotProps={{ htmlInput: { maxLength: 120 } }} onChange={event => setSearch(event.target.value)} sx={{ minWidth: { sm: 245 } }}/>
+              <TextField select size="small" label="Status" value={status} onChange={event => setStatus(event.target.value as StatusFilter)} sx={{ minWidth: 165 }}>
+                {Object.entries(statusLabels).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+              </TextField>
+            </Stack>
+          </Stack>
+          <Box component="details" sx={{ mt: 1.5 }}>
+            <Typography component="summary" variant="body2" sx={{ cursor: "pointer", fontWeight: 600 }}>
+              Date and direction filters{(from || to || direction !== "ALL") && " · Active"}
+            </Typography>
+            <Stack direction={{ xs: "column", sm: "row" }} useFlexGap spacing={1.5} sx={{ mt: 1.5, flexWrap: "wrap" }}>
+              <TextField select size="small" label="Direction" value={direction} onChange={event => setDirection(event.target.value)} sx={{ minWidth: 155 }}>
+                <MenuItem value="ALL">All directions</MenuItem><MenuItem value="IN">Money in</MenuItem><MenuItem value="OUT">Money out</MenuItem>
+              </TextField>
+              <TextField size="small" label="From date" type="date" value={from} onChange={event => setFrom(event.target.value)} slotProps={{ inputLabel: { shrink: true } }}/>
+              <TextField size="small" label="To date" type="date" value={to} error={dateError} helperText={dateError ? "End date must follow start date." : undefined}
+                onChange={event => setTo(event.target.value)} slotProps={{ inputLabel: { shrink: true } }}/>
+            </Stack>
+          </Box>
+          {(search || from || to || direction !== "ALL") && <Button size="small" sx={{ mt: 1 }} onClick={() => { setSearch(""); setFrom(""); setTo(""); setDirection("ALL"); }}>Clear search and filters</Button>}
+        </Box>
+        {refreshing && <LinearProgress aria-label="Refreshing bank records"/>}
+        {dateError ? <EmptyState kind="search" title="Check the date range" description="The end date must be on or after the start date."/> :
+          !filtered.length ? !refreshing && <EmptyState
+            kind={error ? "error" : total ? "search" : "empty"}
+            title={error ? "Reconciliation records unavailable" : !total ? "No statements imported" : !search && !from && !to && direction === "ALL" && status === "REVIEW" ? "No transactions need matching or duplicate review" : "No transactions in this view"}
+            description={error || (total ? "Choose another status or adjust your filters." : "Import a CSV or XLSX bank statement to get started.")}
+            actionLabel={error ? "Retry" : total ? "Show all transactions" : canReview ? "Import statement" : undefined}
+            onAction={error ? () => void load() : total ? () => { setStatus("ALL"); setSearch(""); setFrom(""); setTo(""); setDirection("ALL"); } :
+              canReview ? () => { setFile(null); setImportError(""); setImportOpen(true); } : undefined}/> :
+          mobile ? <Box sx={{ px: 2 }}>
+            {filtered.map(row => <Box key={row.id} sx={{ py: 2, borderBottom: 1, borderColor: "divider" }}>
+              <Stack direction="row" spacing={1} sx={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+                <FinancialStatus status={row.status}/>
+                <Money value={row.amount} currency={row.currency || ""}/>
+              </Stack>
+              <Typography variant="subtitle2" sx={{ mt: 1, overflowWrap: "anywhere" }}>{row.description}</Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", overflowWrap: "anywhere" }}>
+                {financialDate(row.date)}{row.reference ? ` · Ref ${row.reference}` : ""}{row.is_test_data ? " · Test data" : ""}
+              </Typography>
+              <Button size="small" sx={{ mt: .75 }} onClick={() => openRow(row)}>{reviewAction(row, canReview)}</Button>
+            </Box>)}
+            <TablePagination component="div" count={rowCount} page={paginationModel.page} rowsPerPage={paginationModel.pageSize}
+              rowsPerPageOptions={[10, 25, 50, 100]} onPageChange={(_, page) => setPaginationModel(current => ({ ...current, page }))}
+              onRowsPerPageChange={event => setPaginationModel({ page: 0, pageSize: Number(event.target.value) })}/>
+          </Box> :
+          <Box sx={{ height: 580, display: "flex", flexDirection: "column" }}>
+            <GridDensityControl value={preferences.density} onChange={preferences.onDensityChange}/>
+            <DataGrid {...preferences} columnVisibilityModel={{ ...preferences.columnVisibilityModel, status: true }}
+              showToolbar slotProps={{ toolbar: { showQuickFilter: false, csvOptions: { disableToolbarButton: true }, printOptions: { disableToolbarButton: true } } }}
+              rows={filtered} columns={gridColumns} rowCount={rowCount} paginationMode="server" sortingMode="server"
+              disableColumnFilter paginationModel={paginationModel} onPaginationModelChange={setPaginationModel} disableRowSelectionOnClick
+              pageSizeOptions={[10, 25, 50, 100]} sx={{ border: 0, minHeight: 0, flex: 1, fontSize: 13 }}/>
+          </Box>}
+        {loadedAt && <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, py: 1 }}>Updated {financialDate(loadedAt, true)} · Queue counts cover the workspace</Typography>}
       </Paper>
     </>}
     <Drawer open={Boolean(selected)} anchor="right" onClose={()=>{if(!busy)setSelectedId("");}} slotProps={{paper:{role:"dialog","aria-modal":true,"aria-label":"Review bank transaction",sx:{width:{xs:"100%",sm:620},maxWidth:"100%",p:{xs:2,sm:3}}}}}>
@@ -204,8 +299,8 @@ export default function BankReconciliationPage() {
         </Box>}
         {canReview&&selected.status==="MATCHED"&&<Alert severity="info" sx={{mb:2}}>An internal record is linked. Confirm reconciliation only after checking it against the bank statement.</Alert>}
         <ReconciliationGroups selected={selected} canReview={canReview&&online} onChanged={async()=>{setHistoryVersion(value=>value+1);await load();}}/>
-        <ReconciliationHistory bankId={selected.id} version={historyVersion}/>
         {canReview&&!selected.group_id&&["MATCHED","RECONCILED"].includes(selected.status)&&<Stack direction="row" spacing={1} sx={{flexWrap:"wrap",gap:1}}>{selected.status==="MATCHED"&&<Button variant="contained" disabled={busy||!online||selected.source_verified===false} onClick={()=>begin({action:"reconcile"})}>Review & confirm reconciliation</Button>}<Button color="warning" variant="outlined" disabled={busy||!online} onClick={()=>begin({action:"unmatch"})}>Clear match</Button></Stack>}
+        <ReconciliationHistory bankId={selected.id} version={historyVersion}/>
         <DetailGroup title="Other financial information" fields={{"Gateway reference":"Not supplied with this statement","Settlement date / fees":"Not supplied","Review history":"Open Review history and matching evidence above"}}/>
       </>}
     </Drawer>

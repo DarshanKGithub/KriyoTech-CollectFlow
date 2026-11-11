@@ -15,7 +15,7 @@ export function InvoiceProgress({status}: {status: string}) {
 
 export function TripProgress({pickup,loaded,delivered}: {pickup:boolean;loaded:boolean;delivered:boolean}) {
   return <Stepper activeStep={delivered?4:loaded?2:pickup?1:0} alternativeLabel sx={{my:2,"& .MuiStepLabel-label":{fontSize:11}}}>
-    {["Assigned","At pickup","In transit","Delivered"].map(label=><Step key={label}><StepLabel>{label}</StepLabel></Step>)}
+    {["Truck assigned","At pickup","On the way","Delivered"].map(label=><Step key={label}><StepLabel>{label}</StepLabel></Step>)}
   </Stepper>;
 }
 

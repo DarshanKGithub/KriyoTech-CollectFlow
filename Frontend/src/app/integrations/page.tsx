@@ -1,8 +1,10 @@
 "use client";
 import { UiAlert, UiBox, UiButton, UiH1, UiH2, UiHeader, UiInput, UiLabel, UiMain, UiSection, UiSmall, UiSpan, UiStrong, UiText } from "@/components/product-ui";
 import { requestConfirmation } from "@/components/product-dialogs";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { WorkspaceAccessContext } from "@/components/workspace-access-context";
+import { canShowNavigation } from "@/lib/navigation-access";
 import { AppLink as Link } from "@/components/product-ui";
 type APIKey = {
     id: string;
@@ -48,12 +50,8 @@ type IntegrationData = {
     supported_events: string[];
     results: Hook[];
 };
-type GmailStatus = {
-    connected: boolean;
-    email?: string;
-    connected_at?: string;
-};
 export default function IntegrationsPage() {
+    const access = useContext(WorkspaceAccessContext);
     const [keys, setKeys] = useState<APIKey[]>([]);
     const [hooks, setHooks] = useState<Hook[]>([]);
     const [supportedEvents, setSupportedEvents] = useState<string[]>([]);
@@ -64,13 +62,11 @@ export default function IntegrationsPage() {
     const [hookUrl, setHookUrl] = useState("");
     const [hookSecret, setHookSecret] = useState("");
     const [notice, setNotice] = useState("");
-    const [gmail, setGmail] = useState<GmailStatus>({ connected: false });
-    const [busy, setBusy] = useState(false);
     const [expandedHook, setExpandedHook] = useState("");
     const [deliveries, setDeliveries] = useState<Record<string, Delivery[]>>({});
     const load = useCallback(async () => {
-        const [keyResponse, hookResponse, gmailResponse] = await Promise.all([
-            apiFetch("/api-keys"), apiFetch("/webhooks"), apiFetch("/google/gmail"),
+        const [keyResponse, hookResponse] = await Promise.all([
+            apiFetch("/api-keys"), apiFetch("/webhooks"),
         ]);
         if (keyResponse.ok)
             setKeys(await keyResponse.json());
@@ -79,8 +75,6 @@ export default function IntegrationsPage() {
             setSupportedEvents(data.supported_events);
             setHooks(data.results);
         }
-        if (gmailResponse.ok)
-            setGmail(await gmailResponse.json());
     }, []);
     useEffect(() => { void load(); }, [load]);
     async function createKey() {
@@ -153,58 +147,16 @@ export default function IntegrationsPage() {
             await load();
         }
     }
-    async function connectGmail() {
-        setBusy(true);
-        setNotice("");
-        try {
-            const response = await apiFetch("/google/gmail", { method: "POST", body: JSON.stringify({}) });
-            const data = await response.json();
-            if (!response.ok)
-                throw new Error(data.error || "Could not start Google authorization.");
-            window.location.assign(data.authorization_url);
-        }
-        catch (error) {
-            setNotice(error instanceof Error ? error.message : "Could not connect Gmail.");
-            setBusy(false);
-        }
-    }
-    async function disconnectGmail() {
-        setBusy(true);
-        const response = await apiFetch("/google/gmail", { method: "DELETE", body: JSON.stringify({}) });
-        const data = await response.json();
-        setNotice(response.ok ? "Gmail disconnected and its stored refresh token erased." : data.error || "Could not disconnect Gmail.");
-        if (response.ok)
-            await load();
-        setBusy(false);
-    }
-    async function syncGmail() {
-        setBusy(true);
-        setNotice("");
-        try {
-            const response = await apiFetch("/google/gmail/sync", { method: "POST", body: JSON.stringify({}) });
-            const data = await response.json();
-            if (!response.ok)
-                throw new Error(data.error || "Gmail sync failed.");
-            setNotice(`Gmail checked ${data.messages_checked} message(s): imported ${data.attachments_imported} attachment(s), skipped ${data.messages_skipped} already synced, quarantined ${data.attachments_quarantined}.`);
-        }
-        catch (error) {
-            setNotice(error instanceof Error ? error.message : "Gmail sync failed.");
-            await load();
-        }
-        finally {
-            setBusy(false);
-        }
-    }
     return <UiMain className="w-full min-w-0 space-y-6 px-5 py-8">
-    <UiHeader><UiText className="text-xs font-bold uppercase tracking-[.14em] text-forest">Platform · Integrations</UiText><UiH1 className="mt-2 text-2xl font-bold">Connections, API keys & webhooks</UiH1><UiText className="mt-1 text-sm text-slate-500">Connect a read-only Gmail inbox, create scoped API keys, and receive signed event callbacks at public HTTPS endpoints.</UiText></UiHeader>
+    <UiHeader><UiText className="text-xs font-bold uppercase tracking-[.14em] text-forest">Platform · Integrations</UiText><UiH1 className="mt-2 text-2xl font-bold">Connections, API keys & webhooks</UiH1><UiText className="mt-1 text-sm text-slate-500">Create scoped API keys and receive signed event callbacks at public HTTPS endpoints.</UiText></UiHeader>
     {notice && <UiAlert role="status" className="rounded-lg bg-mint px-4 py-3 text-sm text-forest">{notice}</UiAlert>}
 
-    <UiSection className="rounded-xl border border-line bg-white p-5">
-      <UiBox className="flex flex-wrap items-center justify-between gap-4"><UiBox><UiH2 className="text-sm font-bold">Gmail invoice intake</UiH2><UiText className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">Connect a workspace mailbox with read-only Gmail access. Sync imports supported invoice attachments from the last 30 days (up to 25 messages) into invoice review. It never marks messages read or changes labels.</UiText>{gmail.connected && <UiText className="mt-2 text-xs font-semibold text-emerald-700">Connected as {gmail.email}</UiText>}</UiBox>{gmail.connected ? <UiBox className="flex gap-2"><UiButton disabled={busy} onClick={() => void syncGmail()} className="rounded-lg bg-forest px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{busy ? "Working…" : "Sync recent mail"}</UiButton><UiButton disabled={busy} onClick={() => void disconnectGmail()} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-50">Disconnect</UiButton></UiBox> : <UiButton disabled={busy} onClick={() => void connectGmail()} className="rounded-lg bg-forest px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{busy ? "Connecting…" : "Connect Gmail"}</UiButton>}</UiBox>
-      <UiText className="mt-3 text-[11px] text-slate-400">Permission requested: Gmail read-only plus verified account identity. Disconnect erases KriyoPay’s stored refresh token; also revoke KriyoPay in your Google Account to revoke provider access.</UiText>
-    </UiSection>
+    {canShowNavigation("/email-intake", access) && <UiSection className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-white p-5">
+      <UiBox><UiH2 className="text-sm font-bold">Gmail invoice intake</UiH2><UiText className="mt-1 text-sm text-slate-600">Connect your inbox and check recent imports.</UiText></UiBox>
+      <Link href="/email-intake" className="rounded-lg border border-line px-3 py-2 text-sm font-semibold text-forest">Open Email intake</Link>
+    </UiSection>}
 
-    <Link href="/integrations/erp" className="block rounded-xl border border-line bg-white p-5"><UiH2 className="font-bold">ERP & accounting connections →</UiH2><UiText className="mt-2 text-sm text-slate-500">Microsoft Dynamics 365 Finance, ERPNext, TallyPrime, Zoho Books and Zoho Inventory. Manage connections, review imports and prepare accounting exports.</UiText></Link>
+    <Link href="/integrations/erp" className="block rounded-xl border border-line bg-white p-5"><UiH2 className="font-bold">ERP & accounting connections →</UiH2><UiText className="mt-2 text-sm text-slate-500">Connect TallyPrime or Zoho Books to import records and export approved transactions. More connectors are available under Advanced.</UiText></Link>
 
     <UiBox className="grid gap-5 lg:grid-cols-2">
       <UiSection className="rounded-xl border border-line bg-white p-5"><UiH2 className="text-sm font-bold">Create API key</UiH2><UiText className="mt-1 text-xs text-slate-500">Current scope is read-only invoice access. Keys are shown once and stored hashed.</UiText><UiBox className="mt-3 flex gap-2"><UiInput value={keyName} onChange={e => setKeyName(e.target.value)} placeholder="Key name" className="min-w-0 flex-1 rounded-lg border border-line px-3 py-2 text-sm"/><UiButton disabled={!keyName.trim()} onClick={() => void createKey()} className="rounded-lg bg-forest px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Create key</UiButton></UiBox>{keyOnce && <UiBox className="mt-3 rounded-lg bg-amber-50 p-3"><UiText className="text-xs font-semibold">Copy this key now</UiText><UiBox className="mt-2 flex gap-2"><UiInput readOnly aria-label="New API key" value={keyOnce} className="min-w-0 flex-1 rounded border border-amber-200 bg-white px-2 py-2 text-xs"/><UiButton onClick={() => void navigator.clipboard.writeText(keyOnce)} className="rounded border border-amber-200 bg-white px-2 text-xs">Copy</UiButton></UiBox></UiBox>}<UiBox className="mt-4 divide-y divide-line">{keys.map(key => <UiBox key={key.id} className="flex items-center justify-between gap-3 py-3 text-xs"><UiSpan><UiStrong>{key.name}</UiStrong><UiSmall className="ml-2 text-slate-500">{key.prefix} · {key.revoked ? "Revoked" : key.scopes.join(", ")}</UiSmall></UiSpan>{!key.revoked && <UiButton onClick={() => void revokeKey(key.id)} className="rounded border px-2 py-1">Revoke</UiButton>}</UiBox>)}{!keys.length && <UiText className="py-4 text-xs text-slate-500">No API keys issued.</UiText>}</UiBox></UiSection>

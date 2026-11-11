@@ -575,9 +575,9 @@ class FleetRevenueLeakage(APIView):
                 "invoice_number": invoice.invoice_number if invoice else None}
             if not invoice:
                 reasons = []
-                if expected is None or expected <= 0: reasons.append("Transport order has no positive agreed freight amount.")
+                if order.agreed_amount is None or order.agreed_amount <= 0: reasons.append("Transport order has no positive agreed freight amount.")
                 if not base["delivery_proof_present"]: reasons.append("Delivery proof or recipient signature is missing.")
-                ready = expected is not None and expected > 0 and base["delivery_proof_present"]
+                ready = not reasons
                 items.append({**base, "id": f"unbilled:{trip.id}", "issue": "UNBILLED_DELIVERY", "severity": "HIGH" if ready else "MEDIUM",
                     "message": "Delivered trip has no customer invoice." if ready else "Delivered trip is not invoiced and needs the listed prerequisites.",
                     "next_action": "Create draft invoice" if ready else "Resolve prerequisites before billing.", "reasons": reasons})
@@ -597,7 +597,9 @@ class FleetRevenueLeakage(APIView):
                     items.append({**base, "id": f"invoice-variance:{invoice.id}", "issue": "INVOICE_AMOUNT_VARIANCE", "severity": "MEDIUM",
                         "invoice_amount": f"{invoice.amount:.2f}", "message": "Customer invoice amount differs from the agreed order amount.",
                         "next_action": "Review the invoice and order before changing billing records.", "reasons": []})
-                if invoice.due_date and invoice.due_date < today and outstanding > 0 and invoice.status != TransportInvoice.Status.CANCELLED:
+                if invoice.due_date and invoice.due_date < today and outstanding > 0 and invoice.status in {
+                    TransportInvoice.Status.ISSUED, TransportInvoice.Status.PARTIALLY_PAID,
+                }:
                     items.append({**base, "id": f"overdue-receivable:{invoice.id}", "issue": "OVERDUE_RECEIVABLE", "severity": "HIGH",
                         "invoice_amount": f"{invoice.amount:.2f}", "paid_amount": f"{collected:.2f}", "outstanding_amount": f"{outstanding:.2f}",
                         "due_date": invoice.due_date.isoformat(), "message": "Customer invoice is past due with an outstanding balance.",
@@ -618,8 +620,14 @@ class FleetRevenueLeakage(APIView):
         for item in items:
             counts[item["issue"]] = counts.get(item["issue"], 0) + 1
             exposure += Decimal(str(item.get("outstanding_amount") or item.get("expected_amount") or "0")) if item["issue"] in {"UNBILLED_DELIVERY", "OVERDUE_RECEIVABLE"} else Decimal("0.00")
+        report_items = items[:1000]
+        if request.query_params.get("view") == "billing":
+            priority_issues = {"UNBILLED_DELIVERY", "OVERDUE_RECEIVABLE"}
+            billing_items = [item for item in items if item["issue"] in priority_issues]
+            other_items = [item for item in items if item["issue"] not in priority_issues][:1000]
+            report_items = billing_items + other_items
         return Response({"as_of": today.isoformat(), "delivered_trip_count": len(trip_rows), "exception_count": len(items),
-            "potential_exposure": f"{exposure:.2f}", "counts": counts, "items": items[:1000],
+            "potential_exposure": f"{exposure:.2f}", "counts": counts, "items": report_items,
             "money_movement_enabled": False, "note": "Evidence-based review only. No invoices, collections, or financial values are modified automatically."})
 
 
@@ -1752,7 +1760,14 @@ class FleetOperationalReports(APIView):
             if end_date: qs = qs.filter(created_at__date__lte=end_date)
             for trip in qs.order_by("-created_at"):
                 expenses = [x for x in trip.expense_lines.all() if not x.is_estimated and x.status != TripExpenseLine.ReviewStatus.REJECTED]
-                rows.append({"trip_number": trip.trip_number, "date": trip.created_at.date(), "driver": trip.driver.name, "truck": trip.vehicle.registration_number, "status": trip.status, "expense_total": sum((x.amount for x in expenses), Decimal("0.00")), "fuel_litres": sum((x.quantity_litres or Decimal("0")) for x in expenses)})
+                fuel = [line for line in expenses if line.category == TripExpenseLine.Category.FUEL]
+                rows.append({
+                    "trip_number": trip.trip_number, "date": trip.created_at.date(), "driver": trip.driver.name,
+                    "truck": trip.vehicle.registration_number, "status": trip.status,
+                    "expense_total": sum((line.amount for line in expenses), Decimal("0.00")),
+                    "fuel_litres": sum((line.quantity_litres or Decimal("0") for line in fuel if not line.is_refund), Decimal("0.00")),
+                    "fuel_spend": sum((line.amount for line in fuel), Decimal("0.00")),
+                })
         elif report_name == "salary-outstanding":
             qs = DriverSalaryRecord.objects.filter(tenant=request.tenant, status__in=[DriverSalaryRecord.Status.APPROVED, DriverSalaryRecord.Status.PARTIALLY_PAID, DriverSalaryRecord.Status.PAID, DriverSalaryRecord.Status.SETTLED]).select_related("driver").prefetch_related("payments", "advance_recoveries")
             if start_date: qs = qs.filter(period_start__gte=start_date)
@@ -1782,7 +1797,13 @@ class FleetOperationalReports(APIView):
             response = HttpResponse(output.getvalue(), content_type="text/csv")
             response["Content-Disposition"] = f'attachment; filename="{export_prefix()}-{report_name}.csv"'
             return response
-        return Response({"report": report_name, "count": len(rows), "rows": rows})
+        result = {"report": report_name, "count": len(rows), "rows": rows}
+        if report_name == "trip-costs":
+            result["totals"] = {
+                key: str(sum((row[key] for row in rows), Decimal("0.00")))
+                for key in ("expense_total", "fuel_spend", "fuel_litres")
+            }
+        return Response(result)
 
 
 class TripDetail(APIView):
@@ -2381,7 +2402,7 @@ class FleetFollowUps(APIView):
     def get(self, request):
         if request.membership.role == Membership.Role.DRIVER:
             return Response({"error": "Fleet follow-up access required."}, status=403)
-        qs = FleetFollowUp.objects.filter(tenant=request.tenant).order_by("due_at", "created_at")
+        qs = FleetFollowUp.objects.filter(tenant=request.tenant).select_related("trip__vehicle", "trip__driver").order_by("due_at", "created_at")
         return Response(FleetFollowUpSerializer(qs, many=True).data)
 
     def post(self, request):

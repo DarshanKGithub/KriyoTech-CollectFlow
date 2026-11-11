@@ -11,7 +11,7 @@ export function CollectionExplorer({ rows, recordPrefix, onOpen, children }: { r
   const [view, setView] = useState("cards");
   return <Box sx={{ minWidth: 0 }}>
     <ToggleButtonGroup value={view} exclusive size="small" aria-label="List presentation" onChange={(_, next: string | null) => { if (next) setView(next); }} sx={{ mb: 2 }}>
-      <ToggleButton value="cards"><LayoutList size={16} style={{ marginRight: 6 }} />Workflow cards</ToggleButton><ToggleButton value="table"><Table2 size={16} style={{ marginRight: 6 }} />Searchable table</ToggleButton>
+      <ToggleButton value="cards"><LayoutList size={16} style={{ marginRight: 6 }} />Cards</ToggleButton><ToggleButton value="table"><Table2 size={16} style={{ marginRight: 6 }} />Table</ToggleButton>
     </ToggleButtonGroup>
     {view === "table" && <RecordDataGrid rows={rows} columns={rows[0] ? Object.keys(rows[0]).filter(field => field !== "id") : []} onOpenRecord={id => {
       onOpen(id); setView("cards");

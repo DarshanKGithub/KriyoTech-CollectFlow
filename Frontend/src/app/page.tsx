@@ -13,6 +13,7 @@ export default function Home() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [days, setDays] = useState<7 | 30 | 90>(30);
   const sequence = useRef(0);
   const load = useCallback(async (silent = false) => {
     const request = ++sequence.current;
@@ -20,7 +21,7 @@ export default function Home() {
     try {
       if (!accessToken()) throw new Error("Sign in to load your workspace data.");
       const [summaryResponse, profileResponse] = await Promise.all([
-        apiFetch("/dashboard/summary?analytics=1&days=30&include_recent=0"), apiFetch("/auth/me"),
+        apiFetch(`/dashboard/summary?analytics=1&days=${days}&include_recent=0`), apiFetch("/auth/me"),
       ]);
       if (!summaryResponse.ok || !profileResponse.ok)
         throw new Error(summaryResponse.status === 401 || profileResponse.status === 401
@@ -63,8 +64,8 @@ export default function Home() {
     } finally {
       if (request === sequence.current) { setRefreshing(false); setLoading(false); }
     }
-  }, []);
+  }, [days]);
   useEffect(() => { void load(); }, [load]);
 
-  return <OverviewVisualDashboard summary={summary} profile={profile} fleet={fleetSnapshot} fleetMessage={fleetMessage} loading={loading} refreshing={refreshing} message={message} onRefresh={load} />;
+  return <OverviewVisualDashboard summary={summary} profile={profile} fleet={fleetSnapshot} fleetMessage={fleetMessage} loading={loading} refreshing={refreshing} message={message} days={days} onDaysChange={setDays} onRefresh={load} />;
 }

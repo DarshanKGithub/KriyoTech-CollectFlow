@@ -51,6 +51,16 @@ class InvoiceSerializer(serializers.ModelSerializer):
             data["vendor"] = data["vendor_name"] = data["vendor_phone"] = None
         if instance.document_id and instance.document.tenant_id != instance.tenant_id:
             data["document"] = None
+        if hasattr(instance, "outstanding_balance"):
+            data["outstanding_balance"] = format(instance.outstanding_balance, ".2f")
+            if not data["vendor"]:
+                data["payment_hold"] = "missing_supplier"
+            elif not instance.vendor.approved:
+                data["payment_hold"] = "unapproved_supplier"
+            elif any(item.blocking and item.status not in {"RESOLVED", "OVERRIDDEN"} for item in instance.exceptions.all()):
+                data["payment_hold"] = "blocking_exception"
+            else:
+                data["payment_hold"] = None
         latest = self.latest_extraction(instance)
         data["extraction_status"] = latest.status if latest else None
         warnings = latest.output.get("warnings", []) if latest and isinstance(latest.output, dict) else []

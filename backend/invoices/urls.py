@@ -13,7 +13,10 @@ from payments.views import PayoutInstructionCollection, PayoutInstructionDecisio
 
 router = DefaultRouter()
 router.register("invoices", InvoiceViewSet, basename="invoice")
+from phase3.mobile_oauth import MobileOAuthExchange
+
 urlpatterns = [
+    path("auth/oauth/mobile/exchange", MobileOAuthExchange.as_view()),
     path("billing/summary", TenantBillingSummary.as_view()),
     path("billing/razorpay/create-order", RazorpayCreateOrder.as_view()),
     path("billing/razorpay/verify-payment", RazorpayVerifyPayment.as_view()),

@@ -87,7 +87,7 @@ def fleet_feature_for_path(tail):
         "fleet_trips": {"trips"}, "fleet_assets": {"vehicles", "drivers"},
         "fleet_fuel": {"fuel"}, "fleet_maintenance": {"maintenance", "reliability"},
         "fleet_documents": {"vehicle-documents", "logistics-documents"},
-        "fleet_orders": {"customers", "orders"},
+        "fleet_orders": {"customers", "orders", "lorry-receipts"},
         "fleet_return_loads": {"return-loads", "booking-history"},
         "fleet_docks": {"docks", "dock-appointments", "detention"},
         "fleet_exceptions": {"alerts", "exceptions", "follow-ups"},

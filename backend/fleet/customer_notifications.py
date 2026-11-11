@@ -129,8 +129,23 @@ class CustomerNotificationStatus(APIView):
     permission_classes=[HasTenantMembership]
     def get(self,request):
         if request.membership.role not in {"OWNER","FINANCE","FLEET","APPROVER"}:return Response({"error":"Fleet review access required."},status=403)
-        rows=ShipmentNotice.objects.filter(link__tenant=request.tenant).order_by("-created_at")[:200]
-        return Response({**provider_status(),"notices":[{"id":str(r.id),"channel":r.channel,"status":r.status,"event":r.event_key,"attempts":r.attempts,"last_error":r.last_error,"provider_reference":r.provider_reference} for r in rows]})
+        rows = ShipmentNotice.objects.filter(link__tenant=request.tenant).select_related("link__trip").order_by("-created_at")[:200]
+        notices = [
+            {
+                "id": str(row.id),
+                "channel": row.channel,
+                "status": row.status,
+                "event": row.event_key,
+                "attempts": row.attempts,
+                "last_error": row.last_error,
+                "provider_reference": row.provider_reference,
+                "trip_number": row.link.trip.trip_number,
+                "order_number": (row.payload or {}).get("order_number", ""),
+                "updated_at": row.updated_at.isoformat(),
+            }
+            for row in rows
+        ]
+        return Response({**provider_status(), "notices": notices})
     def post(self,request):
         from uuid import UUID
         from .views import audit

@@ -183,6 +183,68 @@ class TransportOrder(models.Model):
         indexes = [models.Index(fields=["tenant", "status", "created_at"]), models.Index(fields=["tenant", "customer", "created_at"])]
 
 
+class LorryReceiptSequence(models.Model):
+    """Tenant/year counter. Receipt creation locks the tenant before advancing it."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="lorry_receipt_sequences")
+    year = models.PositiveSmallIntegerField()
+    next_number = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "year"], name="uniq_lr_sequence_tenant_year")]
+
+
+class LorryReceipt(models.Model):
+    class PaymentType(models.TextChoices):
+        TO_PAY = "TO_PAY", "To Pay"
+        PAID = "PAID", "Paid"
+        TO_BE_BILLED = "TO_BE_BILLED", "To Be Billed"
+
+    class Status(models.TextChoices):
+        ISSUED = "ISSUED", "Issued"
+        CANCELLED = "CANCELLED", "Cancelled"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="lorry_receipts")
+    lr_number = models.CharField(max_length=32)
+    lr_date = models.DateField()
+    order = models.ForeignKey(TransportOrder, on_delete=models.PROTECT, related_name="lorry_receipts")
+    trip = models.ForeignKey("FleetTrip", null=True, blank=True, on_delete=models.PROTECT, related_name="lorry_receipts")
+    customer_name = models.CharField(max_length=180)
+    origin = models.CharField(max_length=180)
+    destination = models.CharField(max_length=180)
+    trip_number = models.CharField(max_length=64, blank=True)
+    vehicle_registration = models.CharField(max_length=24, blank=True)
+    driver_name = models.CharField(max_length=180, blank=True)
+    consignor_name = models.CharField(max_length=180)
+    consignor_address = models.TextField(blank=True)
+    consignee_name = models.CharField(max_length=180)
+    consignee_address = models.TextField(blank=True)
+    goods_description = models.CharField(max_length=500)
+    package_count = models.PositiveIntegerField(default=1)
+    weight_kg = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
+    freight_amount = models.DecimalField(max_digits=18, decimal_places=2)
+    payment_type = models.CharField(max_length=16, choices=PaymentType.choices, default=PaymentType.TO_BE_BILLED)
+    eway_bill_number = models.CharField(max_length=80, blank=True)
+    invoice_reference = models.CharField(max_length=80, blank=True)
+    delivery_instructions = models.TextField(blank=True)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.ISSUED)
+    cancellation_reason = models.CharField(max_length=300, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancelled_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="lorry_receipts_cancelled")
+    created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="lorry_receipts_created")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "lr_number"], name="uniq_lorry_receipt_number"),
+            models.CheckConstraint(condition=models.Q(package_count__gt=0), name="lr_package_count_positive"),
+            models.CheckConstraint(condition=models.Q(freight_amount__gte=0), name="lr_freight_nonnegative"),
+        ]
+        indexes = [models.Index(fields=["tenant", "status", "lr_date"]), models.Index(fields=["tenant", "order", "lr_date"])]
+
+
 class FleetDock(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="fleet_docks")

@@ -380,10 +380,13 @@ class FleetTripSerializer(serializers.ModelSerializer):
 
 class FleetFollowUpSerializer(serializers.ModelSerializer):
     trip_id = serializers.UUIDField(required=False, allow_null=True, write_only=True)
+    trip_number = serializers.CharField(source="trip.trip_number", read_only=True, allow_null=True)
+    truck = serializers.CharField(source="trip.vehicle.registration_number", read_only=True, allow_null=True)
+    driver_name = serializers.CharField(source="trip.driver.name", read_only=True, allow_null=True)
 
     class Meta:
         model = FleetFollowUp
-        fields = ["id", "trip_id", "category", "description", "due_at", "status", "resolution_note", "created_at", "resolved_at"]
+        fields = ["id", "trip_id", "trip_number", "truck", "driver_name", "category", "description", "due_at", "status", "resolution_note", "created_at", "resolved_at"]
         read_only_fields = ["id", "status", "resolution_note", "created_at", "resolved_at"]
 
     def validate_trip_id(self, value):

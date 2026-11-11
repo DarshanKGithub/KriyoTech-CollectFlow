@@ -2,7 +2,7 @@
 import { EmptyState } from "@/components/empty-state";
 import { WorkflowFeedback } from "@/components/workflow-feedback";
 import { PageSkeleton } from "@/components/content-skeleton";
-import { UiArticle, UiBox, UiButton, UiForm, UiH1, UiH2, UiH3, UiInput, UiLabel, UiMain, UiSection, UiSelect, UiSpan, UiStrong, UiText, UiTextarea } from "@/components/product-ui";
+import { UiArticle, UiBox, UiButton, UiForm, UiH1, UiH2, UiInput, UiLabel, UiMain, UiSection, UiSelect, UiSpan, UiStrong, UiText, UiTextarea } from "@/components/product-ui";
 import { requestConfirmation, requestInput, showNotice } from "@/components/product-dialogs";
 import { useListPagination } from "@/components/list-pagination";
 import { AppLink as Link } from "@/components/product-ui";
@@ -10,7 +10,7 @@ import { RecordsTable } from "@/components/records-table";
 import { LiveData } from "@/components/live-data";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-type Tool = "email-intake" | "approval-rules" | "sla-rules" | "follow-ups" | "custom-fields" | "bulk-actions" | "reports" | "notifications" | "vendor-aliases" | "financial-notes";
+type Tool = "approval-rules" | "sla-rules" | "follow-ups" | "custom-fields" | "bulk-actions" | "reports" | "notifications" | "vendor-aliases" | "financial-notes";
 type RecordRow = Record<string, unknown> & {
     id?: string;
 };
@@ -25,8 +25,6 @@ export function Phase2Tool({ tool }: {
     const [members, setMembers] = useState<RecordRow[]>([]);
     const [message, setMessage] = useState("");
     const [busy, setBusy] = useState(false);
-    const [token, setToken] = useState("");
-    const [workspaceKey, setWorkspaceKey] = useState("");
     const [report, setReport] = useState("invoice-aging");
     const [reportResult, setReportResult] = useState<unknown>(null);
     const [selected, setSelected] = useState<string[]>([]);
@@ -38,7 +36,6 @@ export function Phase2Tool({ tool }: {
         description: string;
         endpoint: string;
     }> = {
-        "email-intake": { title: "Invoice email intake", description: "Use a private token to accept invoice attachments from your mail automation. Repeated message IDs are safely ignored.", endpoint: "/email-ingestion/logs" },
         "approval-rules": { title: "Approval rules", description: "Route invoices by amount, vendor, and category. Steps run in order and each decision is retained.", endpoint: "/approval-rules" },
         "sla-rules": { title: "Exception SLAs", description: "Set exception deadlines and escalate overdue work to selected workspace roles.", endpoint: "/exception-slas" },
         "follow-ups": { title: "Vendor follow-up drafts", description: "Draft vendor questions, review the recipient and message, then send only when explicitly requested.", endpoint: "/follow-ups" },
@@ -59,18 +56,6 @@ export function Phase2Tool({ tool }: {
     const load = useCallback(async () => {
         setMessage("");
         try {
-            if (tool === "email-intake") {
-                const [tokenResponse, logsResponse] = await Promise.all([apiFetch("/invoice-intake-token"), apiFetch(meta.endpoint)]);
-                if (!tokenResponse.ok)
-                    throw new Error("Only finance users can view the intake token.");
-                const tokenData = await tokenResponse.json();
-                setToken(tokenData.token);
-                setWorkspaceKey(tokenData.workspace_key);
-                if (!logsResponse.ok)
-                    throw new Error("Could not load email ingestion history.");
-                setRows(await logsResponse.json());
-                return;
-            }
             if (tool === "follow-ups") {
                 const [drafts, invoices] = await Promise.all([apiFetch(meta.endpoint), apiFetch("/invoices/")]);
                 if (!drafts.ok || !invoices.ok)
@@ -182,20 +167,6 @@ export function Phase2Tool({ tool }: {
             setBusy(false);
         }
     }
-    async function rotateToken() { setBusy(true); try {
-        const r = await apiFetch("/invoice-intake-token", { method: "POST", body: "{}" });
-        const d = await r.json();
-        if (!r.ok)
-            throw new Error(d.error?.message || "Could not rotate token");
-        setToken(d.token);
-        setMessage("Intake token rotated. Update the configured mail integration.");
-    }
-    catch (e) {
-        setMessage(e instanceof Error ? e.message : "Could not rotate token");
-    }
-    finally {
-        setBusy(false);
-    } }
     async function perform(path: string, body: Record<string, unknown>, success: string) { setBusy(true); setMessage(""); try {
         const r = await apiFetch(path, { method: "POST", body: JSON.stringify(body) });
         const d = await r.json();
@@ -217,9 +188,8 @@ export function Phase2Tool({ tool }: {
     const pagination = useListPagination(rows, tool);
     if (initialLoading) return <PageSkeleton label={`Loading ${meta.title}`} />;
     return <UiMain className="w-full min-w-0 min-h-screen px-5 py-8"><Link href="/" className="text-xs font-semibold text-forest">← Overview</Link><UiH1 className="mt-6 text-2xl font-bold">{meta.title}</UiH1><UiText className="mt-1 max-w-3xl text-sm text-slate-500">{meta.description}</UiText>{message && <WorkflowFeedback message={message} onRefresh={()=>load()} />}
-  {["email-intake", "notifications", "follow-ups", "financial-notes"].includes(tool) && <LiveData key={tool} onRefresh={refreshLive} paused={busy} interval={20000}/>}
+  {["notifications", "follow-ups", "financial-notes"].includes(tool) && <LiveData key={tool} onRefresh={refreshLive} paused={busy} interval={20000}/>}
 
-  {tool === "email-intake" && <UiSection className="mt-6 rounded-xl border border-line bg-white p-5"><UiH2 className="text-sm font-bold">Private intake credential</UiH2><UiText className="mt-1 text-xs text-slate-500">Keep this token secret. Configure your mail provider to POST multipart attachments with message_id, sender, recipient, and subject.</UiText><code className="mt-4 block break-all rounded-lg bg-slate-50 p-3 text-xs">POST /api/v1/email-ingestion/{workspaceKey} · X-Invoice-Intake-Token: {token || "loading…"}</code><UiButton onClick={() => void rotateToken()} disabled={busy} className="mt-3 rounded-lg border border-line px-3 py-2 text-xs font-semibold">Rotate intake token</UiButton><UiSection className="mt-5 overflow-hidden rounded-lg border border-line"><UiH3 className="border-b border-line px-4 py-3 text-xs font-bold">Recent ingestion runs</UiH3>{table(rows)}</UiSection></UiSection>}
 
   {tool === "approval-rules" && <><UiForm onSubmit={submit} className="mt-6 grid gap-4 rounded-xl border border-line bg-white p-5 md:grid-cols-3">{field("Rule name", "name", { required: true, placeholder: "Finance review by amount" })}{field("Priority", "priority", { type: "number", defaultValue: "100" })}{field("Approver roles in sequence", "roles", { required: true, defaultValue: "APPROVER,FINANCE", placeholder: "APPROVER,FINANCE" })}{field("Minimum invoice amount", "min_amount", { type: "number", min: "0", step: ".01", defaultValue: "0" })}{field("Maximum invoice amount", "max_amount", { type: "number", min: "0", step: ".01", defaultValue: "999999999" })}{field("Step SLA hours", "due_hours", { type: "number", min: "1", max: "8760", defaultValue: "72" })}{field("Categories (comma separated)", "categories", { placeholder: "TRAVEL,SERVICES" })}<UiButton disabled={busy} className="self-end rounded-lg bg-forest px-4 py-2.5 text-xs font-semibold text-white">Create approval rule</UiButton></UiForm><UiSection className="mt-5 overflow-hidden rounded-xl border border-line bg-white"><UiH2 className="border-b border-line px-5 py-4 text-sm font-bold">Approval rules</UiH2>{table(rows)}</UiSection><AutoRulePanel rows={aux} vendors={vendors} reload={load} action={perform} busy={busy}/><DelegationPanel rows={delegations} members={members} reload={load} action={perform} busy={busy}/></>}
 

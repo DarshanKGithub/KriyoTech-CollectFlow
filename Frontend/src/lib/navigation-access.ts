@@ -30,6 +30,7 @@ const financeReaders = ["OWNER", "FINANCE", "AUDITOR"];
 const fleetModules:Record<string,string> = {
   "/fleet/live-tracking":"fleet_tracking", "/fleet/geofences":"fleet_geofencing",
   "/fleet/dispatch":"fleet_dispatch", "/fleet/dispatch-planner":"fleet_dispatch",
+  "/fleet/lrs":"fleet_orders",
   "/fleet/trips":"fleet_trips", "/fleet/create-trip":"fleet_trips",
   "/fleet/trucks":"fleet_assets", "/fleet/drivers":"fleet_assets",
   "/fleet/fuel":"fleet_fuel", "/fleet/maintenance":"fleet_maintenance", "/fleet/reliability":"fleet_maintenance",
@@ -50,6 +51,7 @@ const roles: Record<string, string[]> = {
   "/settlements": financeReaders,
   "/users": ["OWNER"], "/branches": ["OWNER"],
   "/invoices": [...financeReaders, "APPROVER", "PURCHASE", "STORE"],
+  "/email-intake": ["OWNER", "FINANCE"],
   "/payments": financeReaders, "/bank-reconciliation": financeReaders,
   "/reports": financeReaders, "/audit": financeReaders, "/exports": financeReaders,
   "/purchase-orders": [...financeReaders, "PURCHASE"],

@@ -171,8 +171,11 @@ def list_bank(tenant, query):
     counts.update({row["status"]: row["total"] for row in base.values("status").annotate(total=Count("id"))})
     rows = base
     status = query.get("status", "ALL"); direction = query.get("direction", "ALL")
-    if status not in {"ALL", *counts} or direction not in {"ALL", "IN", "OUT"}: raise ValidationError("Invalid status or direction filter.")
-    if status != "ALL": rows = rows.filter(status=status)
+    if status not in {"ALL", "REVIEW", *counts} or direction not in {"ALL", "IN", "OUT"}: raise ValidationError("Invalid status or direction filter.")
+    if status == "REVIEW":
+        rows = rows.filter(status__in=[BankTransaction.Status.UNMATCHED, BankTransaction.Status.DUPLICATE])
+    elif status != "ALL":
+        rows = rows.filter(status=status)
     if direction != "ALL": rows = rows.filter(amount__gt=0) if direction == "IN" else rows.filter(amount__lt=0)
     if query.get("account_id"): rows = rows.filter(statement__source_account_id=identifier(query["account_id"], "Account"))
     dates = {}

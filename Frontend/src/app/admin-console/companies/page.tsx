@@ -66,7 +66,7 @@ export default function CompaniesPage() {
             const body = await response.json();
             if (!response.ok)
                 throw new Error(body.error || "Unable to onboard company.");
-            const delivery = body.owner_invitation.status === "console_only" ? "The invitation is logged locally; configure SMTP to deliver it." : body.owner_invitation.status === "submitted_to_email_backend" ? "The owner invitation was submitted for delivery." : "The invitation was created, but email submission failed.";
+            const delivery = body.owner_invitation.status === "PENDING" ? "The owner invitation is queued for delivery; its status is visible on the company record." : `The invitation delivery status is ${body.owner_invitation.status}.`;
             setMessage(`Company created. ${delivery}`);
             if (mode === "PAY_NOW")
                 setPaymentCompany({ id: body.company.id, name: body.company.name });

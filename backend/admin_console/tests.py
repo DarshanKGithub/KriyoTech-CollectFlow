@@ -8,14 +8,17 @@ from io import StringIO
 from django.core import mail
 from django.test import override_settings
 from django.utils import timezone
+from unittest.mock import patch
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import AccessToken
 from accounts.models import Invitation, Membership
 from tenants.models import Tenant
-from .models import AdminAuditLog, AdminStaff, BillingInvoice, Payment, PaymentRefund, Plan, PlanFeature, RazorpayWebhookEvent, TenantFeatureOverride, Feature, Subscription, TenantUsage
+from .models import AdminAuditLog, AdminStaff, BillingInvoice, InvitationDelivery, Payment, PaymentRefund, Plan, PlanFeature, RazorpayWebhookEvent, TenantFeatureOverride, Feature, Subscription, TenantUsage
 from .billing import verify_checkout_signature, verify_webhook_signature
 from django.core.cache import cache
 from .test_helpers import authenticate_staff
+from .invitation_delivery import create_invitation_delivery
+from .tasks import deliver_invitation, maintain_invitation_deliveries
 
 
 class AdminConsoleTests(APITestCase):
@@ -110,10 +113,130 @@ class AdminConsoleTests(APITestCase):
         self.assertFalse(membership.user.has_usable_password())
         invite = Invitation.objects.get(tenant=tenant)
         self.assertEqual(len(invite.token_hash), 64)
+        self.assertEqual(response.data["owner_invitation"]["status"], InvitationDelivery.Status.PENDING)
+        delivery = InvitationDelivery.objects.get(invitation=invite)
+        self.assertTrue(delivery.encrypted_token)
         subscription = Subscription.objects.get(tenant=tenant)
         self.assertEqual(subscription.status, Subscription.Status.TRIAL)
         self.assertGreater(subscription.trial_ends_at, timezone.now()+timedelta(days=8))
         self.assertTrue(AdminAuditLog.objects.filter(tenant=tenant, action="COMPANY_ONBOARDED").exists())
+        detail = self.client.get(f"/api/v1/admin/companies/{tenant.id}")
+        self.assertEqual(detail.status_code, 200, detail.data)
+        self.assertEqual(len(detail.data["pilot_checklist"]), 8)
+        self.assertFalse(detail.data["pilot_checklist"][0]["done"])
+
+    @override_settings(FRONTEND_BASE_URL="https://app.kriyopay.test", EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    @patch("admin_console.tasks.send_mail", return_value=1)
+    def test_owner_invitation_delivery_sends_and_discards_encrypted_token(self, send):
+        tenant = Tenant.objects.create(name="Invitation Works", workspace_key="invitation-works")
+        token = "one-time-invitation-token"
+        invitation = Invitation.objects.create(
+            tenant=tenant,
+            email="owner@invitation.test",
+            role=Membership.Role.OWNER,
+            token_hash=hashlib.sha256(token.encode()).hexdigest(),
+            expires_at=timezone.now() + timedelta(days=7),
+            invited_by=self.staff_user,
+        )
+        delivery = create_invitation_delivery(invitation, token)
+
+        self.assertEqual(deliver_invitation.run(str(delivery.pk)), "submitted")
+
+        delivery.refresh_from_db()
+        self.assertEqual(delivery.status, InvitationDelivery.Status.SUBMITTED)
+        self.assertEqual(delivery.encrypted_token, "")
+        self.assertIn(f"token={token}", send.call_args.args[1])
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.console.EmailBackend")
+    @patch("admin_console.tasks.send_mail", return_value=1)
+    def test_console_email_backend_is_not_reported_as_delivered(self, _send):
+        tenant = Tenant.objects.create(name="Console Works", workspace_key="console-works")
+        token = "console-invitation-token"
+        invitation = Invitation.objects.create(
+            tenant=tenant,
+            email="owner@console.test",
+            role=Membership.Role.OWNER,
+            token_hash=hashlib.sha256(token.encode()).hexdigest(),
+            expires_at=timezone.now() + timedelta(days=7),
+            invited_by=self.staff_user,
+        )
+        delivery = create_invitation_delivery(invitation, token)
+
+        self.assertEqual(deliver_invitation.run(str(delivery.pk)), "console_only")
+        delivery.refresh_from_db()
+        self.assertEqual(delivery.status, InvitationDelivery.Status.CONSOLE_ONLY)
+
+    @patch("admin_console.tasks.send_mail", side_effect=RuntimeError("provider details must not be stored"))
+    def test_failed_owner_invitation_delivery_is_visible_and_retryable(self, _send):
+        tenant = Tenant.objects.create(name="Retry Works", workspace_key="retry-works")
+        token = "retryable-invitation-token"
+        invitation = Invitation.objects.create(
+            tenant=tenant,
+            email="owner@retry.test",
+            role=Membership.Role.OWNER,
+            token_hash=hashlib.sha256(token.encode()).hexdigest(),
+            expires_at=timezone.now() + timedelta(days=7),
+            invited_by=self.staff_user,
+        )
+        delivery = create_invitation_delivery(invitation, token)
+
+        self.assertEqual(deliver_invitation.run(str(delivery.pk)), "failed")
+
+        delivery.refresh_from_db()
+        self.assertEqual(delivery.status, InvitationDelivery.Status.FAILED)
+        self.assertEqual(delivery.attempt_count, 1)
+        self.assertTrue(delivery.encrypted_token)
+        self.assertNotIn("provider details", delivery.error_message)
+        self.assertGreater(delivery.next_attempt_at, timezone.now())
+
+    @patch("admin_console.tasks.deliver_invitation.delay")
+    def test_invitation_maintenance_republishes_due_delivery(self, enqueue):
+        tenant = Tenant.objects.create(name="Recovery Works", workspace_key="recovery-works")
+        invitation = Invitation.objects.create(
+            tenant=tenant,
+            email="owner@recovery.test",
+            role=Membership.Role.OWNER,
+            token_hash=hashlib.sha256(b"recovery-token").hexdigest(),
+            expires_at=timezone.now() + timedelta(days=7),
+            invited_by=self.staff_user,
+        )
+        delivery = create_invitation_delivery(invitation, "recovery-token")
+        InvitationDelivery.objects.filter(pk=delivery.pk).update(
+            status=InvitationDelivery.Status.FAILED,
+            attempt_count=1,
+            next_attempt_at=timezone.now() - timedelta(minutes=2),
+        )
+
+        result = maintain_invitation_deliveries.run()
+
+        self.assertEqual(result, {"published": 1})
+        enqueue.assert_called_once_with(str(delivery.pk))
+
+    def test_company_admin_can_reissue_unaccepted_invitation(self):
+        tenant = Tenant.objects.create(name="Reissue Works", workspace_key="reissue-works")
+        invitation = Invitation.objects.create(
+            tenant=tenant,
+            email="owner@reissue.test",
+            role=Membership.Role.OWNER,
+            token_hash=hashlib.sha256(b"old-token").hexdigest(),
+            expires_at=timezone.now() - timedelta(days=1),
+            invited_by=self.staff_user,
+        )
+
+        response = self.client.post(
+            f"/api/v1/admin/companies/{tenant.id}/invitations/{invitation.id}/resend",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        invitation.refresh_from_db()
+        delivery = InvitationDelivery.objects.get(invitation=invitation)
+        self.assertEqual(response.data["status"], InvitationDelivery.Status.PENDING)
+        self.assertNotEqual(invitation.token_hash, hashlib.sha256(b"old-token").hexdigest())
+        self.assertGreater(invitation.expires_at, timezone.now() + timedelta(days=6))
+        self.assertEqual(delivery.attempt_count, 0)
+        self.assertTrue(AdminAuditLog.objects.filter(action="COMPANY_INVITATION_REISSUED", tenant=tenant).exists())
 
     def test_read_only_admin_cannot_change_company_or_plan(self):
         self.staff.role = AdminStaff.Role.READ_ONLY

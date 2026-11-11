@@ -3,7 +3,6 @@ import hashlib
 from datetime import timedelta
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import Count, Sum, Q
 from django.core.paginator import Paginator
@@ -15,7 +14,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from accounts.models import Invitation, Membership
 from tenants.models import Tenant
-from .models import AdminAuditLog, AdminStaff, BillingInvoice, Feature, Payment, PaymentRefund, Plan, PlanFeature, Subscription, TenantFeatureOverride, TenantUsage
+from .models import AdminAuditLog, AdminStaff, BillingInvoice, Feature, InvitationDelivery, Payment, PaymentRefund, Plan, PlanFeature, Subscription, TenantFeatureOverride, TenantUsage
 from accounts.permissions import HasTenantMembership
 from .permissions import IsAdminStaff
 from .serializers import AuditSerializer, BillingInvoiceSerializer, FeaturePricingSerializer, FeatureSerializer, PaymentSerializer, PlanSerializer, RefundSerializer, SubscriptionSerializer, TenantSerializer, UsageSerializer
@@ -112,17 +111,15 @@ class CompanyListCreate(APIView):
         invite_token = secrets.token_urlsafe(32)
         invitation = Invitation.objects.create(tenant=tenant, email=email, role=Membership.Role.OWNER,
             token_hash=hashlib.sha256(invite_token.encode()).hexdigest(), expires_at=timezone.now()+timedelta(days=7), invited_by=request.user)
-        from partners.services import frontend_link, branding
-        accept_url = frontend_link("/invite/accept", {"token": invite_token})
-        sent_count = send_mail(f"Set up your {branding()['product_name']} account for {tenant.name}", f"Hello {owner_name},\n\nYour workspace has been created. Set your password and activate access here (link expires in 7 days):\n{accept_url}\n", settings.DEFAULT_FROM_EMAIL, [email], fail_silently=True)
+        from .invitation_delivery import create_invitation_delivery
+        invitation_delivery = create_invitation_delivery(invitation, invite_token)
         status_value = Subscription.Status.TRIAL if data.get("trial_enabled", True) and not collect_payment else Subscription.Status.ONBOARDING
         days = trial_days if status_value == Subscription.Status.TRIAL else None
         ends = timezone.now() + timedelta(days=days) if days else None
         sub = Subscription.objects.create(tenant=tenant, plan=plan, status=status_value, billing_cycle=billing_cycle, trial_ends_at=ends, current_period_end=ends)
-        audit(request, "COMPANY_ONBOARDED", tenant, tenant, reason=str(data.get("notes", ""))[:500], metadata={"plan": plan.slug, "owner_email": email, "invitation_id": str(invitation.id), "invitation_email_sent": bool(sent_count)})
-        delivery_status = "console_only" if settings.EMAIL_BACKEND.endswith("console.EmailBackend") else "submitted_to_email_backend" if sent_count else "not_submitted"
+        audit(request, "COMPANY_ONBOARDED", tenant, tenant, reason=str(data.get("notes", ""))[:500], metadata={"plan": plan.slug, "owner_email": email, "invitation_id": str(invitation.id), "invitation_delivery_status": invitation_delivery.status})
         return Response({"company": TenantSerializer(tenant).data, "subscription": SubscriptionSerializer(sub).data,
-                         "owner_invitation": {"status": delivery_status, "email": email, "expires_at": invitation.expires_at}}, status=201)
+                         "owner_invitation": {"status": invitation_delivery.status, "email": email, "expires_at": invitation.expires_at}}, status=201)
 
 
 class CompanyDetail(APIView):
@@ -130,9 +127,65 @@ class CompanyDetail(APIView):
     def get(self, request, tenant_id):
         tenant = Tenant.objects.filter(pk=tenant_id, is_deleted=False).first()
         if not tenant: return Response({"error": "Company not found."}, status=404)
+        from exceptions_app.models import InvoiceException
+        from invoices.models import Invoice
+        from procurement.models import GRN, PurchaseOrder
+        from vendors.models import Vendor
+
         memberships = Membership.objects.filter(tenant=tenant).select_related("user")
+        invitations = list(Invitation.objects.filter(tenant=tenant).order_by("-expires_at")[:20])
+        deliveries = {
+            delivery.invitation_id: delivery
+            for delivery in InvitationDelivery.objects.filter(invitation__in=invitations)
+        }
+        accepted_owner_invitation = Invitation.objects.filter(
+            tenant=tenant, role=Membership.Role.OWNER, accepted_at__isnull=False
+        ).exists()
+        active_pilot_users = memberships.filter(
+            is_active=True, role__in=[Membership.Role.FINANCE, Membership.Role.APPROVER]
+        ).count()
+        approved_vendors = Vendor.objects.filter(tenant=tenant, approved=True).count()
+        purchase_orders = PurchaseOrder.objects.filter(tenant=tenant).count()
+        receipts = GRN.objects.filter(tenant=tenant).count()
+        invoices = Invoice.objects.filter(
+            tenant=tenant,
+            status__in=[
+                Invoice.Status.REVIEW_REQUIRED,
+                Invoice.Status.MATCHED,
+                Invoice.Status.EXCEPTION,
+                Invoice.Status.APPROVAL_PENDING,
+                Invoice.Status.APPROVED,
+                Invoice.Status.REJECTED,
+                Invoice.Status.PAYMENT_READY,
+                Invoice.Status.EXPORTED,
+            ],
+        ).count()
+        exception_cases = InvoiceException.objects.filter(tenant=tenant).count()
+        decided_invoices = Invoice.objects.filter(
+            tenant=tenant, status__in=[Invoice.Status.APPROVED, Invoice.Status.REJECTED]
+        ).count()
+        pilot_checklist = [
+            {"key": "owner-activated", "label": "Owner accepted the workspace invitation", "done": accepted_owner_invitation, "current": int(accepted_owner_invitation), "target": 1},
+            {"key": "pilot-team", "label": "Finance or approver user added", "done": active_pilot_users > 0, "current": active_pilot_users, "target": 1},
+            {"key": "approved-vendor", "label": "At least one vendor approved", "done": approved_vendors > 0, "current": approved_vendors, "target": 1},
+            {"key": "purchase-orders", "label": "Sample purchase orders loaded", "done": purchase_orders >= 10, "current": purchase_orders, "target": 10},
+            {"key": "goods-receipts", "label": "Sample goods receipts loaded", "done": receipts >= 10, "current": receipts, "target": 10},
+            {"key": "invoices", "label": "Invoices reached review or matching", "done": invoices >= 20, "current": invoices, "target": 20},
+            {"key": "exceptions", "label": "Representative exception cases created", "done": exception_cases >= 6, "current": exception_cases, "target": 6},
+            {"key": "invoice-decision", "label": "At least one invoice approved or rejected", "done": decided_invoices > 0, "current": decided_invoices, "target": 1},
+        ]
         detail = {"company": TenantSerializer(tenant).data,
+            "pilot_checklist": pilot_checklist,
             "users": [{"email": m.user.email, "name": m.user.get_full_name(), "role": m.role, "active": m.is_active} for m in memberships],
+            "invitations": [{
+                "id": str(invitation.id),
+                "email": invitation.email,
+                "role": invitation.role,
+                "expires_at": invitation.expires_at,
+                "accepted_at": invitation.accepted_at,
+                "status": "ACCEPTED" if invitation.accepted_at else "EXPIRED" if invitation.expires_at <= timezone.now() else deliveries[invitation.id].status if invitation.id in deliveries else "NOT_TRACKED",
+                "error_message": deliveries[invitation.id].error_message if invitation.id in deliveries else "",
+            } for invitation in invitations],
             "subscriptions": SubscriptionSerializer(Subscription.objects.filter(tenant=tenant).select_related("plan"), many=True).data,
             "entitlements": entitlements_for(tenant),
             "usage": UsageSerializer(TenantUsage.objects.filter(tenant=tenant).order_by("-period_start"), many=True).data}
@@ -159,6 +212,40 @@ class CompanyDetail(APIView):
         tenant.deleted_at = timezone.now()
         tenant.save(update_fields=["is_deleted", "deleted_at"])
         return Response({"deleted": True, "retained_data": True})
+
+
+class CompanyInvitationResend(APIView):
+    permission_classes = [IsAdminStaff]
+    allowed_roles = [AdminStaff.Role.SUPER_ADMIN, AdminStaff.Role.ADMIN]
+
+    @transaction.atomic
+    def post(self, request, tenant_id, invitation_id):
+        tenant = Tenant.objects.filter(pk=tenant_id, is_deleted=False).first()
+        if not tenant:
+            return Response({"error": "Company not found."}, status=404)
+        invitation = Invitation.objects.select_for_update().filter(
+            pk=invitation_id, tenant=tenant
+        ).first()
+        if not invitation:
+            return Response({"error": "Invitation not found."}, status=404)
+        if invitation.accepted_at:
+            return Response({"error": "This invitation has already been accepted."}, status=409)
+
+        from .invitation_delivery import reissue_invitation
+        delivery = reissue_invitation(invitation)
+        audit(
+            request,
+            "COMPANY_INVITATION_REISSUED",
+            tenant,
+            invitation,
+            metadata={"email": invitation.email, "delivery_status": delivery.status},
+        )
+        return Response({
+            "id": str(invitation.id),
+            "email": invitation.email,
+            "expires_at": invitation.expires_at,
+            "status": delivery.status,
+        })
 
 
 class AdminPasswordChange(APIView):

@@ -4,7 +4,8 @@ import { authStorage, authSessionStorage, partnerHeaders } from "@/lib/partner";
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Building2, Check, Eye, EyeOff, FileCheck2, LockKeyhole, ReceiptIndianRupee, ShieldCheck, Truck, ScanLine, CircleCheck, LoaderCircle } from "lucide-react";
+import Image from "next/image";
+import { ArrowRight, Building2, Eye, EyeOff, LockKeyhole, MapPin, Navigation, PackageCheck, Route, ShieldCheck, Truck, CircleCheck, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -93,27 +94,38 @@ export default function LoginPage() {
     }
     return <main className="login-page">
       <header className="login-header">
-        <Link href="/login" className="login-brand" aria-label="KriyoPay sign in"><span className="login-brand-icon"><ReceiptIndianRupee size={24}/></span><span><ProductName/><small>FINANCE. IN MOTION.</small></span></Link>
-        <div className="login-header-actions"><span className="login-secure"><LockKeyhole size={13}/>Your workspace, protected</span><ThemeToggle/></div>
+        <Link href="/login" className="login-brand" aria-label={`${brand.product_name} sign in`}><Image className="login-brand-wordmark" src="/kriyotech-logistics-wordmark.png" alt="KriyoTech" width={188} height={50} priority/><span className="login-brand-divider" aria-hidden="true"/><span className="login-brand-product"><ProductName/><small>TRANSPORT ERP</small></span></Link>
+        <div className="login-header-actions"><span className="login-secure"><LockKeyhole size={13}/>Secure company access</span><ThemeToggle/></div>
       </header>
       <div className="login-layout">
         <section className="login-story" aria-labelledby="login-story-title">
-          <div className="login-eyebrow"><span/>YOUR BUSINESS WORKSPACE</div>
-          <h1 id="login-story-title">Every invoice.<br/>Every journey.<br/><em>Under control.</em></h1>
-          <p className="login-intro">Bring invoice reviews, approvals and transport operations into one clear workspace.</p>
-          <div className="login-flow" aria-label="Illustration of the invoice workflow">
-            <div className="login-flow-top"><span><ScanLine size={15}/>INVOICE TO PAYMENT</span><span className="login-example">Workflow preview</span></div>
-            <div className="login-receipt"><div className="login-receipt-icon"><FileCheck2 size={24}/></div><div><strong>From paperwork to clarity</strong><p>Capture the details. Keep the context.</p></div><CircleCheck className="login-check" size={22}/></div>
-            <div className="login-flow-steps">{[{icon:ScanLine,title:"Extract",text:"Capture invoice fields"},{icon:ShieldCheck,title:"Review",text:"Check and approve"},{icon:Check,title:"Record",text:"Track the payment"}].map((step,index)=><div key={step.title} className="login-flow-step"><span className="login-step-icon"><step.icon size={18}/></span><small>0{index+1}</small><strong>{step.title}</strong><p>{step.text}</p></div>)}</div>
-            <div className="login-transport"><Truck size={18}/><span>Fleet & trips <small>Operations and driver finance, connected.</small></span><ArrowRight size={16}/></div>
+          <div className="login-story-content">
+            <div className="login-eyebrow"><span/>YOUR TRANSPORT CONTROL CENTER</div>
+            <h1 id="login-story-title">Every trip.<br/>Every delivery.<br/><em>In one view.</em></h1>
+            <p className="login-intro">Plan dispatch, follow your fleet, and keep customer billing connected from pickup to payment.</p>
+            <div className="login-route-preview" aria-label="Illustration of a shipment route from Bengaluru to Chennai">
+              <div className="login-preview-heading"><span><Route size={15}/>SHIPMENT OVERVIEW</span><span className="login-preview-tag">WORKSPACE PREVIEW</span></div>
+              <div className="login-route-map" aria-hidden="true">
+                <div className="login-map-grid"/>
+                <svg className="login-route-line" viewBox="0 0 600 190" preserveAspectRatio="none">
+                  <path className="login-route-shadow" d="M88 135 C150 135 150 65 240 72 S350 130 410 90 S500 50 525 52"/>
+                  <path className="login-route-dash" d="M88 135 C150 135 150 65 240 72 S350 130 410 90 S500 50 525 52"/>
+                </svg>
+                <span className="login-map-pin login-map-start"><span><MapPin size={14}/></span><small>BENGALURU</small></span>
+                <span className="login-map-pin login-map-end"><span><MapPin size={14}/></span><small>CHENNAI</small></span>
+                <span className="login-map-truck"><Truck size={17}/></span>
+                <span className="login-map-caption"><Navigation size={12}/> Route at a glance</span>
+              </div>
+              <div className="login-route-summary"><span className="login-route-summary-icon"><PackageCheck size={19}/></span><span className="login-route-copy"><strong>One connected journey</strong><small>Dispatch · Live tracking · Customer invoice</small></span><CircleCheck className="login-route-check" size={19}/></div>
           </div>
-          <div className="login-trust"><span><ShieldCheck size={15}/>Approval controls</span><span><Building2 size={15}/>Company workspaces</span></div>
+            <div className="login-trust"><span><ShieldCheck size={15}/>Role-based access</span><span><Building2 size={15}/>Separate company workspaces</span></div>
+          </div>
         </section>
         <section className="login-access" aria-labelledby="login-access-title"><div className="login-card">
           <span className="login-access-icon"><LockKeyhole size={22}/></span>
-          <div className="login-eyebrow">{choices.length?"YOUR COMPANIES":`WELCOME TO ${brand.product_name.toUpperCase()}`}</div>
-          <h2 id="login-access-title">{choices.length?"Choose your workspace":"Good to have you back."}</h2>
-          <p className="login-card-description">{choices.length?"Select the company you want to work with.":"Sign in to pick up where you left off."}</p>
+          <div className="login-eyebrow">{choices.length?"YOUR COMPANIES":"WELCOME BACK"}</div>
+          <h2 id="login-access-title">{choices.length?"Choose a workspace":"Sign in to KriyoPay"}</h2>
+          <p className="login-card-description">{choices.length?"Select the company you want to work with.":"Access your trips, fleet, and financial work in one place."}</p>
           {!choices.length?<>
             {sessionExpired&&<div role="status" className="login-notice">Your session expired. Sign in to continue where you left off.</div>}
             <form onSubmit={submit} className="login-form">
@@ -122,11 +134,11 @@ export default function LoginPage() {
               {error&&<div role="alert" className="login-error">{error}</div>}
               <Button type="submit" disabled={busy} className="login-submit">{busy?<><LoaderCircle size={17} className="animate-spin"/>Signing in…</>:<>Sign in to your workspace<ArrowRight size={17}/></>}</Button>
             </form>
-            <div className="login-account-note"><ShieldCheck size={18}/><p><strong>One sign-in. The right workspace.</strong><span>Company members and Super Admins sign in here. Your selected product and account role determine where you go.</span></p></div>
+            <div className="login-account-note"><ShieldCheck size={18}/><p><strong>Your work stays with your company.</strong><span>Company access and available actions follow your assigned role.</span></p></div>
             <p className="login-invite-note">New to your team? Ask your company administrator for an invitation.</p>
           </>:<div className="login-workspaces">{choices.map(workspace=><button type="button" key={workspace.workspace_key} onClick={()=>enterWorkspace(workspace)}><span className="login-workspace-icon"><Building2 size={20}/></span><span><strong>{workspace.tenant}</strong><small>{workspace.role.replaceAll("_"," ")}</small></span><ArrowRight size={17}/></button>)}</div>}
         </div><p className="login-access-caption"><LockKeyhole size={12}/>Access follows your company role and permissions.</p></section>
       </div>
-      <footer className="login-footer"><span>© {new Date().getFullYear()} <ProductName/></span><span>Clarity for finance. Control for operations.</span></footer>
+      <footer className="login-footer"><span>© {new Date().getFullYear()} <ProductName/></span><a href={`mailto:${brand.support_email}`} className="underline underline-offset-4">Contact KriyoPay support</a></footer>
     </main>;
 }

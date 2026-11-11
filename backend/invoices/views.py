@@ -204,7 +204,7 @@ class AcceptInvitation(APIView):
 class UserList(APIView):
     permission_classes = [HasTenantMembership]
     def get(self, request):
-        return Response([{"id": str(m.user_id), "email": m.user.email, "name": m.user.get_full_name(), "role": m.role, "is_active": m.is_active} for m in Membership.objects.filter(tenant=request.tenant).select_related("user")])
+        return Response([{"id": str(m.user_id), "membership_id": str(m.id), "email": m.user.email, "name": m.user.get_full_name(), "role": m.role, "is_active": m.is_active} for m in Membership.objects.filter(tenant=request.tenant).select_related("user")])
     def patch(self, request, user_id):
         if request.membership.role != "OWNER": return Response({"error": {"code": "PERMISSION_DENIED", "message": "Owner role required"}}, status=403)
         from django.db import transaction
@@ -236,6 +236,9 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     ordering_fields = ["invoice_date", "invoice_total", "created_at"]
     def get_queryset(self):
         rows = Invoice.objects.filter(tenant=self.request.tenant).select_related("vendor", "document").prefetch_related("lines", "exceptions").order_by("-created_at", "-id")
+        if self.action == "list" and self.request.query_params.get("payment_queue") == "1":
+            from payments.services import with_invoice_balances
+            rows = with_invoice_balances(rows).filter(outstanding_balance__gt=0)
         if self.action in {"list", "retrieve"}:
             rows = rows.prefetch_related(Prefetch(
                 "extractions",

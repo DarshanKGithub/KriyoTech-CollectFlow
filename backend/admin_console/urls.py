@@ -4,7 +4,7 @@ from .auth import AdminLoginView, AdminMFAVerifyView, AdminMFASetupView, AdminMF
 from .health import ExtractionHealth
 from .company_checkout import CompanyCheckout, CompanyCheckoutVerify
 from .views import FeaturePricing
-from .views import AdminDashboard, AdminMe, AdminPasswordChange, AuditLogs, BillingInvoices, CompanyDetail, CompanyEntitlements, CompanyLifecycle, CompanyListCreate, Features, OfflinePaymentRecord, PaymentRefundCreate, Payments, PlanDetail, PlanFeatures, Plans, RazorpayEvents, Refunds, Subscriptions, SuperAdminCreate, Usage
+from .views import AdminDashboard, AdminMe, AdminPasswordChange, AuditLogs, BillingInvoices, CompanyDetail, CompanyEntitlements, CompanyInvitationResend, CompanyLifecycle, CompanyListCreate, Features, OfflinePaymentRecord, PaymentRefundCreate, Payments, PlanDetail, PlanFeatures, Plans, RazorpayEvents, Refunds, Subscriptions, SuperAdminCreate, Usage
 from .views_configuration import (
     ConfigurationView, PlanFeaturesView, TenantConfigurationView, ConfigurationHistoryView,
     ConfigurationCacheView
@@ -23,6 +23,7 @@ urlpatterns = [
     path("dashboard/summary", AdminDashboard.as_view()),
     path("companies", CompanyListCreate.as_view()),
     path("companies/<uuid:tenant_id>", CompanyDetail.as_view()),
+    path("companies/<uuid:tenant_id>/invitations/<uuid:invitation_id>/resend", CompanyInvitationResend.as_view()),
     path("companies/<uuid:tenant_id>/checkout", CompanyCheckout.as_view()),
     path("companies/<uuid:tenant_id>/checkout/verify", CompanyCheckoutVerify.as_view()),
     path("companies/<uuid:tenant_id>/entitlements", CompanyEntitlements.as_view()),

@@ -5,7 +5,7 @@ import { WorkflowFeedback } from "@/components/workflow-feedback";
 import { ContentSkeleton } from "@/components/content-skeleton";
 import { InvoiceUploadDialog } from "@/components/invoice-upload-dialog";
 import { requestConfirmation, showNotice } from "@/components/product-dialogs";
-import { InvoiceGrid } from "@/components/invoice-grid";
+import { InvoiceGrid, invoiceStatusLabels } from "@/components/invoice-grid";
 import { InvoiceProgress } from "@/components/workflow-progress";
 import { UiBox, UiButton, UiForm, UiH1, UiH2, UiH3, UiIconButton, UiInput, UiLabel, UiMain, UiReviewDrawer, UiSelect, UiSection, UiSpan, UiSpinner, UiText } from "@/components/product-ui";
 import { ListPagination } from "@/components/list-pagination";
@@ -13,7 +13,8 @@ import { LiveData } from "@/components/live-data";
 import { AppLink as Link } from "@/components/product-ui";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { Check, FilePlus2, RefreshCw, Upload, X, ExternalLink } from "lucide-react";
+import { Check, FilePlus2, RefreshCw, X, ExternalLink, ClipboardCheck, FileText, Wallet, TriangleAlert } from "lucide-react";
+import { Button } from "@mui/material";
 type InvoiceLine = {
     description: string;
     item_code?: string;
@@ -48,6 +49,13 @@ type Invoice = {
 const pretty = (value: string) => value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
 const canEdit = (row: Invoice) => !row.financial_locked_at && !["APPROVED", "PAYMENT_READY", "EXPORTED", "APPROVAL_PENDING", "EXTRACTING"].includes(row.status) && (!row.payment_status || row.payment_status === "UNPAID");
 const money = (value: string) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(Number(value || 0));
+const reviewStatuses = ["UPLOADED", "EXTRACTION_FAILED", "REVIEW_REQUIRED", "EXCEPTION"].join(",");
+const queues = [
+    { value: "", label: "All invoices", detail: "Browse the full invoice list", icon: FileText },
+    { value: reviewStatuses, label: "Needs attention", detail: "New invoices, review, or issues", icon: TriangleAlert },
+    { value: "APPROVAL_PENDING", label: "Awaiting approval", detail: "Invoices sent for approval", icon: ClipboardCheck },
+    { value: "PAYMENT_READY", label: "Ready for payment", detail: "Invoices ready to export", icon: Wallet },
+];
 export default function InvoiceQueue() {
     const [uploadOpen, setUploadOpen] = useState(false);
     const [rows, setRows] = useState<Invoice[]>([]);
@@ -73,7 +81,9 @@ export default function InvoiceQueue() {
         if (!silent)
             setLoading(true);
         try {
-            const [response, settingsResponse] = await Promise.all([apiFetch(`/invoices/?page=${page + 1}&page_size=${pageSize}&search=${encodeURIComponent(search)}&ordering=${encodeURIComponent(ordering)}${statusFilter ? `&status=${encodeURIComponent(statusFilter)}` : ""}`), apiFetch("/settings")]);
+            const params = new URLSearchParams({ page: String(page + 1), page_size: String(pageSize), search, ordering });
+            if (statusFilter) params.set(statusFilter === reviewStatuses ? "status__in" : "status", statusFilter);
+            const [response, settingsResponse] = await Promise.all([apiFetch(`/invoices/?${params}`), apiFetch("/settings")]);
             if (sequence !== requestSequence.current)
                 return;
             if (response.status === 404 && page > 0) {
@@ -248,14 +258,64 @@ export default function InvoiceQueue() {
         if (workflowEnabled && canEdit(invoice) && ["REVIEW_REQUIRED","EXCEPTION","MATCHED"].includes(invoice.status)) actions.push({label:"Resume automation",key:"resume-automation",className:"text-forest"});
         return actions;
     }
-    return <UiMain className="w-full min-w-0 min-h-screen px-5 py-8"><Link href="/" className="text-xs font-semibold text-forest">← Overview</Link><UiBox className="mt-6 flex flex-wrap items-end justify-between gap-4"><UiBox><UiH1 className="text-2xl font-bold">Invoices</UiH1><UiText className="mt-1 text-sm text-slate-500">Upload once. KriyoPay checks suppliers, validates totals, matches documents and routes approvals. Review only the items that need attention.</UiText></UiBox><UiButton type="button" onClick={() => setUploadOpen(true)} className="bg-forest text-white"><FilePlus2 size={15}/>Upload invoice</UiButton></UiBox>{message && <WorkflowFeedback message={message} onRefresh={()=>load()} />}<LiveData onRefresh={() => load(true)} interval={30000} paused={Boolean(uploadOpen || editing || busy || loading)}/><UiBox className="mt-5 flex flex-wrap items-end gap-3"><UiLabel className="min-w-0 flex-1 text-xs">Search invoices<UiInput className="mt-1 w-full" value={searchInput} onChange={event=>setSearchInput(event.target.value)} placeholder="Invoice number, supplier or PO" aria-label="Search invoices" maxLength={200}/></UiLabel><UiLabel className="text-xs">Status<UiSelect aria-label="Filter invoice status" className="mt-1 block" value={statusFilter} onChange={event=>{setPage(0);setStatusFilter(event.target.value);}}><option value="">All statuses</option>{["UPLOADED","EXTRACTING","EXTRACTION_FAILED","REVIEW_REQUIRED","MATCHED","EXCEPTION","APPROVAL_PENDING","APPROVED","REJECTED","PAYMENT_READY","EXPORTED"].map(status=><option key={status} value={status}>{status.replaceAll("_"," ").toLowerCase()}</option>)}</UiSelect></UiLabel>{(searchInput || statusFilter)&&<UiButton type="button" onClick={()=>{setSearchInput("");setStatusFilter("");setPage(0);}}>Clear filters</UiButton>}</UiBox><UiSection className="mt-6 overflow-hidden rounded-xl border border-line bg-white shadow-card"><UiBox className="flex items-center justify-between border-b border-line px-5 py-4 text-xs font-semibold">All invoices <UiSpan className="ml-1 text-slate-400">{total}</UiSpan><UiIconButton onClick={() => void load()} aria-label="Refresh invoices" className="ml-auto text-slate-500 hover:text-forest"><RefreshCw size={14}/></UiIconButton></UiBox>{loading ? <ContentSkeleton variant="table" label="Loading invoices" /> : rows.length === 0 ? <UiBox className="p-12 text-center"><Upload className="mx-auto text-slate-300"/><EmptyState kind={search || statusFilter ? "search" : "empty"} description={search || statusFilter ? "Try another search or clear the filters." : "Upload a supplier invoice to start extraction and review."} onAction={()=>{if(search || statusFilter){setSearchInput("");setStatusFilter("");setPage(0);}else setUploadOpen(true);}} actionLabel={search || statusFilter ? "Clear filters" : "Upload invoice"} /><UiText className="mt-1 text-xs text-slate-500">Upload a PDF or image to create the first invoice record.</UiText></UiBox> : <UiBox className="overflow-x-auto"><InvoiceGrid onOrderingChange={setOrdering} rows={rows} total={total} page={page} pageSize={pageSize} busy={busy} actions={invoice => <>{invoice.document && <UiButton type="button" disabled={busy === invoice.id} onClick={() => void openSource(invoice)}><ExternalLink size={12}/>Source</UiButton>}{actionsFor(invoice).map(item => <UiButton key={item.key} type="button" disabled={busy === invoice.id} onClick={() => {
-                        if (item.key === "review") {
-                            setEditing(invoice);
-                            setEditingLines(invoice.lines || []);
-                        }
-                        else
-                            void action(invoice, item.key);
-                    }} className={item.className}>{item.label}</UiButton>)}</>}/></UiBox>}<ListPagination count={total} page={page} pageSize={pageSize} disabled={loading || Boolean(busy)} label="Invoice pagination" onPageChange={setPage} onPageSizeChange={size => { setPageSize(size); setPage(0); }}/></UiSection>
+    const clearFilters = () => { setSearchInput(""); setSearch(""); setStatusFilter(""); setPage(0); };
+    const queueTitle = queues.find(item => item.value === statusFilter)?.label || invoiceStatusLabels[statusFilter] || "Invoices";
+    return <UiMain className="w-full min-w-0 space-y-5 px-4 py-7 sm:px-6 lg:px-8">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Link href="/" className="text-xs font-semibold text-forest">← Overview</Link>
+          <UiH1 className="mt-2 text-2xl font-bold">Supplier invoices</UiH1>
+          <UiText className="mt-1 text-sm text-slate-600">Find invoices that need review, approval, or payment preparation.</UiText>
+        </div>
+        <Button variant="contained" startIcon={<FilePlus2 size={17}/>} disabled={Boolean(busy)} onClick={() => setUploadOpen(true)}>Upload invoice</Button>
+      </header>
+      {message && !editing && <WorkflowFeedback message={message} onRefresh={() => load()}/>}
+      <LiveData onRefresh={() => load(true)} interval={30000} paused={Boolean(uploadOpen || editing || busy || loading)}/>
+      <UiSection aria-label="Invoice queues" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {queues.map(({ value, label, detail, icon: Icon }) => <button key={value} type="button" aria-pressed={statusFilter === value}
+          onClick={() => { setPage(0); setStatusFilter(value); }}
+          className={`flex items-start gap-3 rounded-xl border p-4 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-forest ${statusFilter === value ? "border-forest bg-emerald-50" : "border-line bg-white hover:bg-slate-50"}`}>
+          <Icon size={18} className="mt-0.5 shrink-0 text-forest" aria-hidden="true"/>
+          <span><span className="block text-sm font-semibold">{label}</span><span className="mt-1 block text-xs text-slate-600">{detail}</span></span>
+        </button>)}
+      </UiSection>
+      <UiSection className="overflow-hidden rounded-xl border border-line bg-white">
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line p-4">
+          <div>
+            <UiH2 className="text-base font-bold">{queueTitle}</UiH2>
+            <UiText aria-live="polite" className="text-xs text-slate-600">{loading ? "Loading invoices…" : `${total} matching ${total === 1 ? "invoice" : "invoices"}`}</UiText>
+          </div>
+          <div className="flex w-full flex-wrap items-end gap-2 lg:w-auto">
+            <UiLabel className="min-w-0 flex-1 text-xs">Search invoices
+              <UiInput className="mt-1 w-full" value={searchInput} onChange={event => setSearchInput(event.target.value)} placeholder="Invoice number, supplier, or PO" maxLength={200}/>
+            </UiLabel>
+            <UiLabel className="text-xs">Status
+              <UiSelect className="mt-1 block" value={statusFilter} onChange={event => { setPage(0); setStatusFilter(event.target.value); }}>
+                <option value="">All statuses</option><option value={reviewStatuses}>Needs attention</option>
+                {Object.entries(invoiceStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </UiSelect>
+            </UiLabel>
+            {(searchInput || statusFilter) && <Button size="small" onClick={clearFilters}>Clear filters</Button>}
+            <UiIconButton disabled={loading || Boolean(busy)} onClick={() => void load()} aria-label="Refresh invoices"><RefreshCw size={16}/></UiIconButton>
+          </div>
+        </div>
+        {loading ? <ContentSkeleton variant="table" label="Loading invoices"/> : rows.length === 0 ?
+          <EmptyState kind={search || statusFilter ? "search" : "empty"}
+            description={search || statusFilter ? "Try another search or status." : "Upload a supplier invoice to start extraction and review."}
+            onAction={search || statusFilter ? clearFilters : () => setUploadOpen(true)}
+            actionLabel={search || statusFilter ? "Clear filters" : "Upload invoice"}/> :
+          <InvoiceGrid onOrderingChange={setOrdering} rows={rows} total={total} page={page} pageSize={pageSize} busy={busy} actions={invoice => <>
+            {actionsFor(invoice).map(item => <Button key={item.key} size="small" disabled={busy === invoice.id}
+              variant={["review", "approve", "export", "submit-for-approval"].includes(item.key) ? "outlined" : "text"}
+              onClick={() => {
+                if (item.key === "review") { setEditing(invoice); setEditingLines(invoice.lines || []); }
+                else void action(invoice, item.key);
+              }}>{item.label}</Button>)}
+            {invoice.document && <Button size="small" disabled={busy === invoice.id} onClick={() => void openSource(invoice)} startIcon={<ExternalLink size={13}/>}>Source</Button>}
+          </>}/>}
+        {total > 10 && <ListPagination count={total} page={page} pageSize={pageSize} disabled={loading || Boolean(busy)} label="Invoice pagination"
+          onPageChange={setPage} onPageSizeChange={size => { setPageSize(size); setPage(0); }}/>}
+      </UiSection>
   {editing && <UiReviewDrawer className="fixed inset-0 z-50 grid place-items-center bg-slate-900/40 p-4" onClose={() => setEditing(null)}><UiForm onSubmit={saveReview} className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl"><UiBox className="flex items-start justify-between"><UiBox><UiH2 className="text-lg font-bold">Review invoice fields</UiH2><UiText className="mt-1 text-xs text-slate-500">Check the extracted header and line items against the source. AI never approves or pays invoices.</UiText></UiBox><UiIconButton type="button" onClick={() => setEditing(null)} aria-label="Close" className="text-slate-400"><X size={18}/></UiIconButton></UiBox><InvoiceProgress status={editing.status}/><WorkflowFeedback message={message} />{Object.keys(editing.extraction_confidence || {}).length > 0 && <UiBox className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3"><UiText className="text-xs font-semibold text-amber-900">Model-reported confidence (uncalibrated)</UiText><UiBox className="mt-2 flex flex-wrap gap-2">{Object.entries(editing.extraction_confidence || {}).map(([field, score]) => <UiSpan key={field} className={`rounded px-2 py-1 text-[11px] ${Number(score) < 0.9 ? "bg-rose-100 font-semibold text-rose-800" : "bg-white text-slate-700"}`}>{pretty(field)} · {Math.round(Number(score) * 100)}%{Number(score) < 0.9 ? " · verify" : ""}</UiSpan>)}</UiBox></UiBox>}<UiBox className="mt-5 grid gap-4 sm:grid-cols-2"><UiLabel className="text-xs font-semibold">Linked supplier<UiSelect name="vendor" required defaultValue={editing.vendor||""} className="mt-2 w-full"><option value="">Select supplier…</option>{suppliers.map(supplier=><option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</UiSelect><UiText className="mt-1 text-xs text-slate-500">Choose the supplier record used for approvals and payment.</UiText></UiLabel>{[["supplier_name", "Supplier", editing.supplier_name || editing.vendor_name || ""], ["invoice_number", "Invoice number", editing.invoice_number], ["invoice_date", "Invoice date", editing.invoice_date || ""], ["invoice_total", "Invoice total", editing.invoice_total]].map(([name, label, value]) => <UiLabel key={name} className="text-xs font-semibold">{label}<UiInput name={name} type={name === "invoice_date" ? "date" : name === "invoice_total" ? "number" : "text"} min={name === "invoice_total" ? "0.01" : undefined} step={name === "invoice_total" ? "0.01" : undefined} defaultValue={value} required={name !== "invoice_date"} className="mt-2 w-full rounded-lg border border-line px-3 py-2.5 text-sm font-normal"/></UiLabel>)}</UiBox><UiBox className="mt-6 flex items-center justify-between"><UiBox><UiH3 className="text-sm font-bold">Invoice line items</UiH3><UiText className="mt-1 text-[11px] text-slate-500">Add reviewed lines so matching can compare quantities, rates, and GST.</UiText></UiBox><UiButton type="button" onClick={addLine} className="rounded-lg border border-line px-3 py-2 text-xs font-semibold text-forest">Add line</UiButton></UiBox><UiBox className="mt-3 space-y-3">{editingLines.map((line, index) => <UiBox key={index} className="rounded-lg border border-line p-3"><UiBox className="grid gap-2 sm:grid-cols-4">{([["description", "Description", "text"], ["item_code", "Item code", "text"], ["quantity", "Quantity", "number"], ["uom", "UOM", "text"], ["rate", "Rate", "number"], ["taxable_value", "Taxable value", "number"], ["gst_rate", "GST %", "number"], ["gst_amount", "GST amount", "number"]] as const).map(([key, label, type]) => <UiLabel key={key} className="text-[10px] font-semibold text-slate-600">{label}<UiInput name={`lines.${index}.${key}`} min={type === "number" ? (key === "quantity" ? "0.000001" : "0") : undefined} type={type} step={type === "number" ? "0.000001" : undefined} value={line[key] ?? ""} required={["description", "quantity", "rate"].includes(key)} onChange={event => setLine(index, key, event.target.value)} className="mt-1 w-full rounded-md border border-line px-2 py-2 text-xs font-normal"/></UiLabel>)}</UiBox><UiButton type="button" onClick={() => setEditingLines(lines => lines.filter((_, i) => i !== index))} className="mt-2 text-[10px] font-semibold text-rose-700">Remove line</UiButton></UiBox>)}{editingLines.length === 0 && <EmptyState description="Add at least one reviewed line before matching." onAction={addLine} actionLabel="Add line item" />}</UiBox><UiBox className="mt-6 flex justify-end gap-2"><UiButton type="button" onClick={() => setEditing(null)} className="rounded-lg border border-line px-4 py-2 text-xs font-semibold">Cancel</UiButton><UiButton disabled={busy === editing.id} className="inline-flex items-center gap-2 rounded-lg bg-forest px-4 py-2 text-xs font-semibold text-white">{busy === editing.id ? <UiSpinner className="animate-spin" size={14}/> : <Check size={14}/>}Save corrections</UiButton></UiBox></UiForm></UiReviewDrawer>}
   <InvoiceUploadDialog open={uploadOpen} onClose={() => setUploadOpen(false)} onUpload={upload} busy={busy === "upload"} automatic={extractionEnabled}/></UiMain>;
 }

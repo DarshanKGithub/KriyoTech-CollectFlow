@@ -19,6 +19,11 @@ button, input { font: inherit; }
     --muted: 150 12% 96%; --muted-foreground: 102.35 8.21% 40.59%;
     --accent: 151 35% 94%; --accent-foreground: 144 32.61% 18.04%;
     --destructive: 0 69% 48%; --destructive-foreground: 0 0% 100%;
+    /* Shared semantic tokens for transport, finance, and administration surfaces. */
+    --success: 145 63% 32%; --success-foreground: 0 0% 100%;
+    --warning: 38 92% 45%; --warning-foreground: 24 10% 10%;
+    --information: 205 82% 45%; --information-foreground: 0 0% 100%;
+    --sidebar-width: 15.5rem; --sidebar-collapsed-width: 4.25rem; --app-header-height: 3.5rem;
     --border: 150 12% 90%; --input: 150 12% 86%; --ring: 153.55 67.88% 26.86%; --radius: .7rem;
   }
 }
@@ -36,8 +41,19 @@ html.dark {
   --muted: 151 19% 17%; --muted-foreground: 145 14% 69%;
   --accent: 152 24% 21%; --accent-foreground: 40 43.90% 83.92%;
   --destructive: 348 65% 55%; --destructive-foreground: 0 0% 100%;
+  --success: 145 52% 48%; --success-foreground: 153 24% 8%;
+  --warning: 38 90% 60%; --warning-foreground: 153 24% 8%;
+  --information: 205 82% 62%; --information-foreground: 153 24% 8%;
   --border: 149 17% 24%; --input: 149 17% 28%; --ring: 40 43.90% 83.92%;
   color-scheme: dark;
+}
+html { font-feature-settings: "ss01" on, "cv11" on; text-rendering: optimizeLegibility; }
+body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+@media print {
+  body * { visibility: hidden !important; }
+  .lr-print-root, .lr-print-root * { visibility: visible !important; }
+  .lr-print-root { position: fixed !important; inset: 0 !important; width: 100% !important; padding: 24px !important; overflow: visible !important; color: #16231c !important; background: #fff !important; }
 }
 html.dark body { background: #101A17; color: #E7F1EB; }
 html.dark :is(.bg-white, .bg-white\/95, .bg-white\/90, .bg-slate-50, .bg-gray-50) { background-color: #18251F !important; }
@@ -56,7 +72,20 @@ html.dark .admin-content .MuiDataGrid-cell { border-color: #33483D; }
 html.dark .admin-content .MuiDataGrid-row:hover { background: #233B30; }
 html.dark .MuiChartsAxis-tickLabel, html.dark .MuiChartsLegend-label { fill: #A4B8AD !important; }
 html.dark .MuiChartsGrid-line { stroke: #33483D !important; }
-.fleet-module-bar { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(12px); }
+.fleet-module-bar { position: sticky; top: var(--workspace-navbar-height, 0px); z-index: 20; background: var(--brand-surface); border-color: var(--brand-border); }
+.fleet-module-link { display: inline-flex; min-height: 38px; flex: 1 0 auto; align-items: center; justify-content: center; gap: 8px; padding: 0 12px; border: 1px solid transparent; border-radius: 7px; color: var(--brand-muted); font-size: 13px; font-weight: 600; line-height: 1; white-space: nowrap; text-decoration: none; transition: background-color 150ms, color 150ms, border-color 150ms; }
+.fleet-module-link:hover { color: var(--brand-text); background: var(--brand-subtle); text-decoration: none; }
+.fleet-module-link[aria-current] { color: #12603D; background: #E5F3ED; border-color: #BEDDCD; }
+.fleet-module-link[aria-current]:hover { background: #D9EDE3; }
+.fleet-module-link:focus-visible { outline: 2px solid var(--brand-green); outline-offset: -2px; }
+@media (min-width: 1024px) and (min-height: 720px) {
+  .fleet-control-center { height: calc(100dvh - var(--workspace-navbar-height, 50px) - 51px); }
+  .fleet-control-map { flex: 1; min-height: 0; }
+  .fleet-control-map .fleet-map-viewport { flex: 1; min-height: 0; height: auto; }
+}
+html.dark .fleet-module-link[aria-current] { color: #B8E4CA; background: #233B30; border-color: #426B53; }
+html.dark .fleet-module-link[aria-current]:hover { background: #2A493A; }
+html.dark .fleet-module-link:focus-visible { outline-color: #B8E4CA; }
 .fleet-workspace .MuiPaper-root { border-radius: 14px; box-shadow: none; }
 .fleet-workspace .MuiPaper-outlined { border-color: #DCE5E0; }
 .fleet-workspace .MuiButton-root { border-radius: 10px; letter-spacing: 0; }
@@ -69,7 +98,6 @@ html.dark .MuiChartsGrid-line { stroke: #33483D !important; }
 .fleet-workspace .MuiTableBody-root .MuiTableRow-root:hover { background-color: rgba(31, 61, 43, .045); }
 .fleet-workspace .MuiAlert-root { border-radius: 12px; }
 .fleet-workspace .MuiChip-root { border-radius: 999px; font-weight: 600; }
-.fleet-workspace main { max-width: 1760px; margin-inline: auto; }
 html.dark .fleet-workspace .MuiPaper-outlined { border-color: #33483D; }
 html.dark .fleet-workspace .MuiTableBody-root .MuiTableRow-root:hover { background-color: rgba(110, 213, 178, .07); }
 .product-sidebar { background-color: #FFFFFF; }
